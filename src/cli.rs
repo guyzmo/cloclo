@@ -8,15 +8,12 @@ use clap::{Parser, Subcommand};
     name = "cloclo",
     version,
     about,
-    long_about = "Cloclo — le proxy magnifique\n\
+    long_about = "cloclo — multi-profile proxy for Claude Code\n\
         \n\
-        A multi-profile authentication proxy and launcher for Claude Code.\n\
-        Manage multiple Anthropic API keys, OAuth tokens, enterprise SSO credentials,\n\
-        and third-party proxies (e.g. GitHub Copilot) from a single config file.\n\
-        \n\
-        Run `cloclo init` to generate a starter config, then `cloclo start` (or `cloclo up`)\n\
-        to start the proxy, and `cloclo launch` (or `cloclo go`) to open Claude Code\n\
-        through the active profile."
+        Manage Anthropic API keys, OAuth tokens, enterprise SSO,\n\
+        and third-party proxies (copilot-api, etc.) from one config.\n\
+        Each `cloclo launch` spawns its own proxy on a random port.\n\
+        Switch profiles or models mid-session with `cloclo sw` / `cloclo m`."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -66,7 +63,7 @@ pub enum Commands {
     #[command(alias = "ls")]
     Profiles,
 
-    /// Launch Claude Code with a specific profile through the proxy.
+    /// Launch Claude Code with a per-session proxy.
     #[command(alias = "go")]
     Launch {
         /// Profile to use.
@@ -76,5 +73,15 @@ pub enum Commands {
         /// Additional arguments passed through to Claude Code.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         claude_args: Vec<String>,
+    },
+
+    /// Set or clear the model override on the running proxy.
+    ///
+    /// Use from within a Claude Code session to switch models on the fly.
+    /// Run with no argument to clear the override.
+    #[command(alias = "m")]
+    Model {
+        /// Model name (e.g. "claude-opus-4-6"). Omit to clear the override.
+        model: Option<String>,
     },
 }

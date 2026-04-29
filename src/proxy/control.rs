@@ -27,6 +27,8 @@ pub struct StatusResponse {
     pub active_profile: String,
     pub upstream_url: String,
     pub model: Option<String>,
+    pub model_override: Option<String>,
+    pub port: u16,
     pub stats: StatsResponse,
     pub profiles: Vec<String>,
 }
@@ -59,6 +61,8 @@ pub async fn get_status(
         active_profile: state.active_profile.clone(),
         upstream_url: state.upstream_url.clone(),
         model,
+        model_override: state.model_override.clone(),
+        port: state.port,
         stats: StatsResponse {
             requests_forwarded: state.stats.requests_forwarded,
             profile_switches: state.stats.profile_switches,
@@ -147,6 +151,72 @@ pub struct ProfileInfo {
     pub name: String,
     pub display_name: String,
     pub active: bool,
+}
+
+/// Request body for setting the model override.
+#[derive(Debug, Deserialize)]
+pub struct ModelRequest {
+    pub model: Option<String>,
+}
+
+/// Response body for model queries.
+#[derive(Debug, Serialize)]
+pub struct ModelResponse {
+    pub model_override: Option<String>,
+    pub profile_model: Option<String>,
+    pub effective_model: String,
+}
+
+/// `GET /_cloclo/model` — returns the current model configuration.
+pub async fn get_model(
+    State(alexandrie): State<Alexandrie>,
+) -> Result<Json<ModelResponse>, ProxyError> {
+    let state = alexandrie.read().await;
+    let profile_model = state.config.profiles.get(&state.active_profile).and_then(|p| {
+        match p {
+            crate::config::ProfileConfig::ApiKey { model, .. } => model.clone(),
+            crate::config::ProfileConfig::OAuth { model, .. } => model.clone(),
+            crate::config::ProfileConfig::EnterpriseSso { model, .. } => model.clone(),
+            crate::config::ProfileConfig::Proxy { model, .. } => model.clone(),
+        }
+    });
+    let effective = state.model_override.clone()
+        .or(profile_model.clone())
+        .unwrap_or_else(|| "(upstream default)".to_string());
+
+    Ok(Json(ModelResponse {
+        model_override: state.model_override.clone(),
+        profile_model,
+        effective_model: effective,
+    }))
+}
+
+/// `POST /_cloclo/model` — sets or clears the model override.
+/// Send `{"model": "claude-opus-4-6"}` to set, `{"model": null}` to clear.
+pub async fn set_model(
+    State(alexandrie): State<Alexandrie>,
+    Json(req): Json<ModelRequest>,
+) -> Result<Json<ModelResponse>, ProxyError> {
+    let mut state = alexandrie.write().await;
+    state.model_override = req.model;
+
+    let profile_model = state.config.profiles.get(&state.active_profile).and_then(|p| {
+        match p {
+            crate::config::ProfileConfig::ApiKey { model, .. } => model.clone(),
+            crate::config::ProfileConfig::OAuth { model, .. } => model.clone(),
+            crate::config::ProfileConfig::EnterpriseSso { model, .. } => model.clone(),
+            crate::config::ProfileConfig::Proxy { model, .. } => model.clone(),
+        }
+    });
+    let effective = state.model_override.clone()
+        .or(profile_model.clone())
+        .unwrap_or_else(|| "(upstream default)".to_string());
+
+    Ok(Json(ModelResponse {
+        model_override: state.model_override.clone(),
+        profile_model,
+        effective_model: effective,
+    }))
 }
 
 /// `GET /_cloclo/health` — simple health check.

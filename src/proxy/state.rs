@@ -15,6 +15,10 @@ pub struct ProxyState {
     pub active_auth: ResolvedAuth,
     /// The upstream URL to forward requests to.
     pub upstream_url: String,
+    /// If set, overrides the model field in request bodies before forwarding.
+    pub model_override: Option<String>,
+    /// The port this proxy session is listening on.
+    pub port: u16,
     /// The full configuration (for profile switching).
     pub config: ClocloConfig,
     /// HTTP client reused across requests.

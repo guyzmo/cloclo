@@ -280,10 +280,10 @@ fn test_startup_banner_contains_port_and_profile() {
         banner
     );
 
-    // Verify the banner contains the title
+    // Verify the banner contains the tool name
     assert!(
-        banner.contains("CLOCLO"),
-        "Banner should contain CLOCLO title: {}",
+        banner.contains("cloclo"),
+        "Banner should contain cloclo: {}",
         banner
     );
 }
@@ -306,17 +306,8 @@ fn test_startup_banner_visual_structure() {
 
     let banner = startup_banner(port, profile);
 
-    // Verify banner has multiple lines
-    let lines: Vec<&str> = banner.lines().collect();
-    assert!(
-        lines.len() > 3,
-        "Banner should have multiple lines, got: {}",
-        lines.len()
-    );
-
-    // Verify banner contains box drawing characters or expected structure
-    assert!(
-        banner.contains("CLOCLO") || banner.contains("Port") || banner.contains("Profile"),
-        "Banner should contain recognizable structure elements"
-    );
+    // Verify banner contains port and profile info
+    assert!(banner.contains("8080"), "Banner should contain port");
+    assert!(banner.contains("work"), "Banner should contain profile");
+    assert!(banner.contains("cloclo"), "Banner should contain tool name");
 }

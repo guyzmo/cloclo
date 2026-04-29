@@ -1,32 +1,38 @@
 use colored::Colorize;
 use rand::seq::IndexedRandom;
 
-/// The default port for the proxy — 9393, because why not.
+/// Default proxy port — 9393.
 pub const DEFAULT_PORT: u16 = 9393;
 
-/// Claude Francois quotes for profile switching moments.
+/// Actual Claude François lyrics, used as switching confirmations.
 const QUOTES: &[&str] = &[
-    "Comme d'habitude, je fais semblant...",
-    "Magnifique! Le profil est change!",
-    "Alexandrie, Alexandra... nouveau profil!",
-    "Le telephone pleure, mais le proxy repond!",
-    "C'est la meme chanson, avec un autre profil...",
-    "Belles, belles, belles — comme ces configurations!",
-    "Danse la vie avec un nouveau profil!",
-    "Aussi libre que le proxy dans le vent...",
-    "Parce que ca fait chic et choc!",
-    "Cette annee-la, le profil a change...",
+    // Comme d'habitude (1967)
+    "Comme d'habitude, toute la journée...",
+    // Alexandrie Alexandra (1978)
+    "Alexandrie, Alexandra — tout doux, tout tranquillement tu t'en vas",
+    // Le téléphone pleure (1974)
+    "Ça fait longtemps que t'es parti, pourquoi tu reviens pas ?",
+    // Belles ! Belles ! Belles ! (1962)
+    "Toutes les filles sont belles quand on est amoureux",
+    // Cette année-là (1976)
+    "Et cette année-là...",
+    // Le lundi au soleil (1972)
+    "Le lundi au soleil, on pourrait changer les choses",
+    // Magnolias for Ever (1977)
+    "Magnolias for ever, for ever and ever",
+    // Chanson populaire (1973)
+    "Viens nous chanter ta chanson populaire",
 ];
 
-/// Farewell messages for shutdown.
+/// Farewell messages on shutdown.
 const FAREWELLS: &[&str] = &[
-    "Salut les copains! Le proxy s'en va...",
-    "Comme d'habitude... au revoir.",
-    "Alexandrie, au revoir!",
-    "Le telephone ne pleure plus.",
+    "Salut — comme d'habitude.",
+    "C'est l'heure de partir, salut les copains.",
+    "Alexandrie — on se revoit bientôt.",
+    "Le téléphone ne pleure plus.",
 ];
 
-/// Returns a random Claude Francois quote — perfect for profile switching.
+/// Returns a random Claude François lyric on profile switch.
 pub fn switching_quote() -> String {
     let mut rng = rand::rng();
     QUOTES.choose(&mut rng).unwrap_or(&QUOTES[0]).to_string()
@@ -38,47 +44,12 @@ pub fn farewell() -> &'static str {
     FAREWELLS.choose(&mut rng).unwrap_or(&FAREWELLS[0])
 }
 
-/// Returns an ASCII art startup banner with port and profile info.
+/// Startup banner — simple, no fake titles.
 pub fn startup_banner(port: u16, profile: &str) -> String {
-    // Inner width of the box (between the two vertical bars) is 45 chars.
-    // Build each interior line as a plain 45-char string, then wrap with borders.
-    let port_str = port.to_string();
-    let inner_width: usize = 45;
-
-    let title_plain = "CLOCLO — le proxy magnifique";
-    let title_padding = inner_width.saturating_sub(title_plain.len());
-    let title_left = title_padding / 2;
-    let title_right = title_padding - title_left;
-    let title_line = format!(
-        "  \u{2551}{}{}{}\u{2551}",
-        " ".repeat(title_left),
-        "CLOCLO — le proxy magnifique".bold().cyan(),
-        " ".repeat(title_right),
-    );
-
-    let port_label = "Port:    ";
-    let port_value_width = inner_width.saturating_sub(port_label.len() + 4); // 4 = "  " each side
-    let port_line = format!(
-        "  \u{2551}  {}{:>width$}  \u{2551}",
-        port_label,
-        port_str.green(),
-        width = port_value_width,
-    );
-
-    let profile_label = "Profile: ";
-    let profile_value_width = inner_width.saturating_sub(profile_label.len() + 4);
-    let profile_line = format!(
-        "  \u{2551}  {}{:>width$}  \u{2551}",
-        profile_label,
-        profile.bold().yellow(),
-        width = profile_value_width,
-    );
-
-    let top    = format!("  \u{2554}{}\u{2557}", "\u{2550}".repeat(inner_width));
-    let divider = format!("  \u{2560}{}\u{2563}", "\u{2550}".repeat(inner_width));
-    let bottom = format!("  \u{255a}{}\u{255d}", "\u{2550}".repeat(inner_width));
-
     format!(
-        "\n{top}\n{title_line}\n{divider}\n{port_line}\n{profile_line}\n{bottom}\n"
+        "{} — port {}, profil {}",
+        "cloclo".bold(),
+        port.to_string().green(),
+        profile.bold().cyan(),
     )
 }

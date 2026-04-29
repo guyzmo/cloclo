@@ -5,7 +5,7 @@ use tracing_subscriber::EnvFilter;
 use cloclo::cli::{Cli, Commands};
 use cloclo::config::{config_path, init_config, load_config};
 use cloclo::daemon::{pid_file_path, start_daemon, stop_daemon};
-use cloclo::launch::{launch_claude, list_profiles, show_status, switch_profile_cli};
+use cloclo::launch::{launch_claude, list_profiles, set_model_cli, show_status, switch_profile_cli};
 use cloclo::proxy::server;
 
 #[tokio::main]
@@ -91,6 +91,11 @@ async fn run() -> anyhow::Result<()> {
             claude_args,
         } => {
             launch_claude(profile.as_deref(), &claude_args).await.map_err(anyhow::Error::from)?;
+            Ok(())
+        }
+
+        Commands::Model { model } => {
+            set_model_cli(model.as_deref()).await.map_err(anyhow::Error::from)?;
             Ok(())
         }
     }
