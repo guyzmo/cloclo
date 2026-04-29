@@ -1,0 +1,95 @@
+mod auth;
+mod chanson;
+mod cli;
+mod config;
+mod daemon;
+mod error;
+mod launch;
+mod proxy;
+mod subprocess;
+
+use clap::Parser;
+use tracing_subscriber::EnvFilter;
+
+use crate::cli::{Cli, Commands};
+use crate::config::{init_config, load_config};
+use crate::daemon::{pid_file_path, start_daemon, stop_daemon};
+use crate::launch::{launch_claude, list_profiles, show_status, switch_profile_cli};
+use crate::proxy::server;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Initialize tracing.
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Init { force } => {
+            init_config(force).map_err(anyhow::Error::from)?;
+            println!("Configuration initialized at {}", config::config_path().display());
+            Ok(())
+        }
+
+        Commands::Start {
+            profile,
+            port,
+            foreground,
+        } => {
+            let config = load_config().map_err(anyhow::Error::from)?;
+            let profile_name = profile
+                .as_deref()
+                .unwrap_or(&config.general.default_profile)
+                .to_string();
+            let port = port.unwrap_or(config.general.port);
+
+            if foreground {
+                server::run(config, &profile_name, port)
+                    .await
+                    .map_err(anyhow::Error::from)?;
+            } else {
+                let pid_path = pid_file_path(config.general.pid_file.as_ref());
+                start_daemon(
+                    Some(&profile_name),
+                    Some(port),
+                    &pid_path,
+                )
+                .map_err(anyhow::Error::from)?;
+            }
+            Ok(())
+        }
+
+        Commands::Stop => {
+            let config = load_config().map_err(anyhow::Error::from)?;
+            let pid_path = pid_file_path(config.general.pid_file.as_ref());
+            stop_daemon(&pid_path).map_err(anyhow::Error::from)?;
+            Ok(())
+        }
+
+        Commands::Switch { profile } => {
+            switch_profile_cli(&profile).map_err(anyhow::Error::from)?;
+            Ok(())
+        }
+
+        Commands::Status => {
+            show_status().map_err(anyhow::Error::from)?;
+            Ok(())
+        }
+
+        Commands::Profiles => {
+            let config = load_config().map_err(anyhow::Error::from)?;
+            list_profiles(&config);
+            Ok(())
+        }
+
+        Commands::Launch {
+            profile,
+            claude_args,
+        } => {
+            launch_claude(profile.as_deref(), &claude_args).map_err(anyhow::Error::from)?;
+            Ok(())
+        }
+    }
+}

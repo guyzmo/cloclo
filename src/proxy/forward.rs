@@ -1,0 +1,151 @@
+use axum::body::Body;
+use axum::extract::State;
+use axum::http::HeaderMap;
+use axum::response::Response;
+use bytes::Bytes;
+use futures::TryStreamExt;
+
+use crate::error::ProxyError;
+use crate::proxy::state::{Alexandrie, ResolvedAuth};
+
+/// Forwards incoming messages to the upstream API.
+///
+/// This is the main proxy handler. It:
+/// 1. Reads the request body
+/// 2. Clones auth + upstream URL from shared state (read lock, then drop)
+/// 3. Builds a reqwest request with injected authentication
+/// 4. Sends to upstream
+/// 5. Checks content-type for "text/event-stream" to decide SSE bridge vs JSON
+pub async fn forward_messages(
+    State(alexandrie): State<Alexandrie>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ProxyError> {
+    // Grab what we need from state, then release the lock immediately.
+    let (auth, upstream_url, client) = {
+        let mut state = alexandrie.write().await;
+        state.stats.requests_forwarded += 1;
+        let auth = state.active_auth.clone();
+        let upstream_url = state.upstream_url.clone();
+        let client = state.client.clone();
+        (auth, upstream_url, client)
+    };
+
+    // Build the upstream URL — append /v1/messages if the body looks like a messages request.
+    let url = format!("{}/v1/messages", upstream_url.trim_end_matches('/'));
+
+    // Build the outgoing request.
+    let mut req_builder = client
+        .post(&url)
+        .header("content-type", "application/json")
+        .body(body);
+
+    // Inject auth headers.
+    req_builder = inject_auth(req_builder, &auth);
+
+    // Forward select headers from the original request.
+    if let Some(anthropic_version) = headers.get("anthropic-version") {
+        req_builder = req_builder.header("anthropic-version", anthropic_version);
+    }
+
+    // Send upstream.
+    let response = req_builder.send().await?;
+
+    // Check if the response is SSE.
+    let is_sse = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .map(|ct| ct.contains("text/event-stream"))
+        .unwrap_or(false);
+
+    let status = response.status();
+    let resp_headers = response.headers().clone();
+
+    if is_sse {
+        // SSE bridge: stream bytes through zero-copy.
+        let stream = response
+            .bytes_stream()
+            .map_err(|e| std::io::Error::other(e));
+        let body = Body::from_stream(stream);
+
+        let mut builder = Response::builder().status(status.as_u16());
+        for (key, value) in resp_headers.iter() {
+            builder = builder.header(key, value);
+        }
+        builder.body(body).map_err(|e| ProxyError::Internal(e.to_string()))
+    } else {
+        // JSON response: read full body and return.
+        let resp_bytes = response.bytes().await?;
+        let mut builder = Response::builder().status(status.as_u16());
+        for (key, value) in resp_headers.iter() {
+            builder = builder.header(key, value);
+        }
+        builder
+            .body(Body::from(resp_bytes))
+            .map_err(|e| ProxyError::Internal(e.to_string()))
+    }
+}
+
+/// Generic JSON forwarding for arbitrary paths.
+pub async fn forward_json(
+    State(alexandrie): State<Alexandrie>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ProxyError> {
+    let (auth, upstream_url, client) = {
+        let mut state = alexandrie.write().await;
+        state.stats.requests_forwarded += 1;
+        (
+            state.active_auth.clone(),
+            state.upstream_url.clone(),
+            state.client.clone(),
+        )
+    };
+
+    let url = upstream_url.trim_end_matches('/').to_string();
+
+    let mut req_builder = client
+        .post(&url)
+        .header("content-type", "application/json")
+        .body(body);
+
+    req_builder = inject_auth(req_builder, &auth);
+
+    if let Some(anthropic_version) = headers.get("anthropic-version") {
+        req_builder = req_builder.header("anthropic-version", anthropic_version);
+    }
+
+    let response = req_builder.send().await?;
+    let status = response.status();
+    let resp_headers = response.headers().clone();
+    let resp_bytes = response.bytes().await?;
+
+    let mut builder = Response::builder().status(status.as_u16());
+    for (key, value) in resp_headers.iter() {
+        builder = builder.header(key, value);
+    }
+    builder
+        .body(Body::from(resp_bytes))
+        .map_err(|e| ProxyError::Internal(e.to_string()))
+}
+
+/// Injects the appropriate authentication header into a request builder.
+fn inject_auth(
+    builder: reqwest::RequestBuilder,
+    auth: &ResolvedAuth,
+) -> reqwest::RequestBuilder {
+    match auth {
+        ResolvedAuth::ApiKey(key) => builder.header("x-api-key", key.as_str()),
+        ResolvedAuth::BearerToken(token) => {
+            builder.header("authorization", format!("Bearer {}", token))
+        }
+        ResolvedAuth::Passthrough { token } => {
+            if let Some(t) = token {
+                builder.header("authorization", format!("Bearer {}", t))
+            } else {
+                builder
+            }
+        }
+    }
+}

@@ -1,0 +1,123 @@
+use axum::extract::State;
+use axum::Json;
+use serde::{Deserialize, Serialize};
+
+use crate::auth::resolve_profile;
+use crate::chanson::switching_quote;
+use crate::error::ProxyError;
+use crate::proxy::state::Alexandrie;
+
+/// Request body for switching profiles.
+#[derive(Debug, Deserialize)]
+pub struct SwitchRequest {
+    pub profile: String,
+}
+
+/// Response body after switching profiles.
+#[derive(Debug, Serialize)]
+pub struct SwitchResponse {
+    pub previous: String,
+    pub current: String,
+    pub message: String,
+}
+
+/// Response body for status queries.
+#[derive(Debug, Serialize)]
+pub struct StatusResponse {
+    pub active_profile: String,
+    pub upstream_url: String,
+    pub stats: StatsResponse,
+    pub profiles: Vec<String>,
+}
+
+/// Serializable stats.
+#[derive(Debug, Serialize)]
+pub struct StatsResponse {
+    pub requests_forwarded: u64,
+    pub profile_switches: u64,
+    pub uptime_secs: Option<u64>,
+}
+
+/// `GET /_cloclo/status` — returns the current proxy status.
+pub async fn get_status(
+    State(alexandrie): State<Alexandrie>,
+) -> Result<Json<StatusResponse>, ProxyError> {
+    let state = alexandrie.read().await;
+    let uptime = state.stats.started_at.map(|s| s.elapsed().as_secs());
+    let profiles: Vec<String> = state.config.profiles.keys().cloned().collect();
+
+    Ok(Json(StatusResponse {
+        active_profile: state.active_profile.clone(),
+        upstream_url: state.upstream_url.clone(),
+        stats: StatsResponse {
+            requests_forwarded: state.stats.requests_forwarded,
+            profile_switches: state.stats.profile_switches,
+            uptime_secs: uptime,
+        },
+        profiles,
+    }))
+}
+
+/// `POST /_cloclo/switch` — switches the active profile.
+pub async fn switch_profile(
+    State(alexandrie): State<Alexandrie>,
+    Json(req): Json<SwitchRequest>,
+) -> Result<Json<SwitchResponse>, ProxyError> {
+    let mut state = alexandrie.write().await;
+
+    let (auth, upstream_url) = resolve_profile(&state.config, &req.profile)
+        .map_err(|e| ProxyError::ProfileNotFound(e.to_string()))?;
+
+    let previous = state.active_profile.clone();
+    state.active_profile = req.profile.clone();
+    state.active_auth = auth;
+    state.upstream_url = upstream_url;
+    state.stats.profile_switches += 1;
+
+    let message = switching_quote();
+
+    Ok(Json(SwitchResponse {
+        previous,
+        current: req.profile,
+        message,
+    }))
+}
+
+/// `GET /_cloclo/profiles` — lists all configured profiles.
+pub async fn list_profiles(
+    State(alexandrie): State<Alexandrie>,
+) -> Result<Json<Vec<ProfileInfo>>, ProxyError> {
+    let state = alexandrie.read().await;
+    let profiles: Vec<ProfileInfo> = state
+        .config
+        .profiles
+        .iter()
+        .map(|(name, config)| ProfileInfo {
+            name: name.clone(),
+            display_name: config.display_name().to_string(),
+            active: name == &state.active_profile,
+        })
+        .collect();
+    Ok(Json(profiles))
+}
+
+/// Profile info returned by the list endpoint.
+#[derive(Debug, Serialize)]
+pub struct ProfileInfo {
+    pub name: String,
+    pub display_name: String,
+    pub active: bool,
+}
+
+/// `GET /_cloclo/health` — simple health check.
+pub async fn health_check() -> &'static str {
+    "OK"
+}
+
+/// `POST /_cloclo/stop` — requests graceful shutdown.
+pub async fn stop_server(
+    State(shutdown_tx): State<tokio::sync::watch::Sender<bool>>,
+) -> &'static str {
+    let _ = shutdown_tx.send(true);
+    "Shutting down..."
+}
