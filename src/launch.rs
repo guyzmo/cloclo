@@ -27,7 +27,7 @@ fn resolve_port() -> Result<u16, ClocloError> {
 /// Launches Claude Code with a per-session proxy.
 ///
 /// Starts a proxy on a random port, runs Claude Code pointing at it,
-/// and shuts everything down when Claude exits.
+/// and shuts everything down when Claude exits or the process is interrupted.
 pub async fn launch_claude(
     profile: Option<&str>,
     claude_args: &[String],
@@ -48,10 +48,18 @@ pub async fn launch_claude(
         .unwrap_or_else(|| std::path::PathBuf::from("claude"));
 
     // Shutdown channel: fires when we want the proxy to stop.
+    // Both the `axum::serve` graceful-shutdown future AND the `/_cloclo/stop`
+    // handler share this single channel (the sender is passed into build_router
+    // so that the HTTP stop endpoint can also trigger shutdown).
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     // Start a per-session proxy on a random port.
-    let port = crate::proxy::server::spawn_session(config, &profile_name, shutdown_rx).await?;
+    let (port, proxy_handle) = crate::proxy::server::spawn_session(
+        config,
+        &profile_name,
+        shutdown_tx.clone(), // router's stop endpoint writes to this
+        shutdown_rx,         // axum::serve reads from this
+    ).await?;
 
     eprintln!(
         "{} cloclo session on port {} — profile {}",
@@ -60,22 +68,47 @@ pub async fn launch_claude(
         profile_name.bold().cyan(),
     );
 
-    // Set the API base URL to point at our session proxy.
     let proxy_url = format!("http://127.0.0.1:{}", port);
 
-    let mut cmd = std::process::Command::new(claude_bin);
-    cmd.args(claude_args);
-    cmd.env("ANTHROPIC_BASE_URL", &proxy_url);
-    cmd.env("ANTHROPIC_API_KEY", "sk-cloclo-proxy");
-    cmd.env("CLOCLO_PORT", port.to_string());
-    cmd.env_remove("ANTHROPIC_AUTH_TOKEN");
+    // Use tokio::process::Command so we don't block the runtime.
+    let mut child = tokio::process::Command::new(&claude_bin)
+        .args(claude_args)
+        .env("ANTHROPIC_BASE_URL", &proxy_url)
+        .env("ANTHROPIC_API_KEY", "sk-cloclo-proxy")
+        .env("CLOCLO_PORT", port.to_string())
+        .env_remove("ANTHROPIC_AUTH_TOKEN")
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .map_err(|e| {
+            ClocloError::Subprocess(format!("Failed to launch Claude Code: {}", e))
+        })?;
 
-    let status = cmd.status().map_err(|e| {
-        ClocloError::Subprocess(format!("Failed to launch Claude Code: {}", e))
-    })?;
+    // Wait for either: claude exits, or we get SIGINT/SIGTERM.
+    let status = tokio::select! {
+        status = child.wait() => {
+            status.map_err(|e| ClocloError::Subprocess(format!("Wait failed: {}", e)))?
+        }
+        _ = tokio::signal::ctrl_c() => {
+            // Got Ctrl+C: SIGINT is delivered to the entire foreground process
+            // group, so the child may already be dead by the time we get here.
+            // `child.kill()` returns an error on an already-exited process; we
+            // intentionally discard it.  We still call `child.wait()` to reap
+            // the zombie regardless.
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            // Signal the proxy to stop and wait for it to fully shut down so
+            // that in-flight SSE streams are drained before we exit.
+            let _ = shutdown_tx.send(true);
+            let _ = proxy_handle.await;
+            return Ok(());
+        }
+    };
 
-    // Claude exited — shut down the proxy.
+    // Claude exited normally — shut down the proxy and wait for it to drain.
     let _ = shutdown_tx.send(true);
+    let _ = proxy_handle.await;
 
     if !status.success() {
         return Err(ClocloError::Subprocess(format!(

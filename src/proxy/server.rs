@@ -99,14 +99,25 @@ pub async fn run(config: ClocloConfig, profile_name: &str, port: u16) -> Result<
     Ok(())
 }
 
-/// Starts the proxy on port 0 (OS-assigned) and returns the actual port.
-/// The server runs until `shutdown_rx` receives `true`.
+/// Starts the proxy on port 0 (OS-assigned) and returns the actual port and a
+/// join handle for the server task.
+///
+/// The server runs until `shutdown_rx` receives `true` (triggered by
+/// `launch_claude`) OR until `POST /_cloclo/stop` fires — both paths use the
+/// **same** watch channel because we pass `shutdown_tx` (the sender side of the
+/// caller's channel) into `build_router`.  Previously a second, orphaned channel
+/// was created here, making `/_cloclo/stop` a no-op for per-session proxies.
+///
+/// The returned `JoinHandle` lets the caller await actual server teardown instead
+/// of relying on an arbitrary sleep.
+///
 /// Used by `cloclo launch` for per-session proxies.
 pub async fn spawn_session(
     config: ClocloConfig,
     profile_name: &str,
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
-) -> Result<u16, ClocloError> {
+) -> Result<(u16, tokio::task::JoinHandle<()>), ClocloError> {
     let mut state = create_state(config, profile_name)?;
 
     // Bind to port 0 — the OS assigns a free port.
@@ -120,14 +131,15 @@ pub async fn spawn_session(
     state.port = port;
 
     let alexandrie: Alexandrie = Arc::new(RwLock::new(state));
-    let (shutdown_tx, _) = tokio::sync::watch::channel(false);
+    // Pass the caller's shutdown_tx into the router so that POST /_cloclo/stop
+    // fires on the very same channel that axum::serve is waiting on below.
     let app = build_router(alexandrie, shutdown_tx);
 
     info!("Session proxy listening on 127.0.0.1:{}", port);
 
     // Spawn the server in a background task; it dies when shutdown_rx fires.
     let mut shutdown = shutdown_rx;
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async move {
                 let _ = shutdown.wait_for(|&v| v).await;
@@ -136,5 +148,5 @@ pub async fn spawn_session(
             .ok();
     });
 
-    Ok(port)
+    Ok((port, handle))
 }
