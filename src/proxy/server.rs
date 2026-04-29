@@ -32,6 +32,10 @@ pub fn build_router(
 
     let proxy_routes = axum::Router::new()
         .route("/v1/messages", post(forward::forward_messages))
+        .route("/v1/messages/count_tokens", post(forward::forward_json))
+        .route("/v1/models", get(forward::forward_get))
+        .route("/v1/models/{model_id}", get(forward::forward_get))
+        .fallback(forward::forward_fallback)
         .with_state(alexandrie);
 
     let app = axum::Router::new()

@@ -40,17 +40,45 @@ pub fn farewell() -> &'static str {
 
 /// Returns an ASCII art startup banner with port and profile info.
 pub fn startup_banner(port: u16, profile: &str) -> String {
-    let title = "  CLOCLO  ".bold().white().on_blue();
-    let subtitle = "Le proxy magnifique".italic();
+    // Inner width of the box (between the two vertical bars) is 45 chars.
+    // Build each interior line as a plain 45-char string, then wrap with borders.
+    let port_str = port.to_string();
+    let inner_width: usize = 45;
+
+    let title_plain = "CLOCLO — le proxy magnifique";
+    let title_padding = inner_width.saturating_sub(title_plain.len());
+    let title_left = title_padding / 2;
+    let title_right = title_padding - title_left;
+    let title_line = format!(
+        "  \u{2551}{}{}{}\u{2551}",
+        " ".repeat(title_left),
+        "CLOCLO — le proxy magnifique".bold().cyan(),
+        " ".repeat(title_right),
+    );
+
+    let port_label = "Port:    ";
+    let port_value_width = inner_width.saturating_sub(port_label.len() + 4); // 4 = "  " each side
+    let port_line = format!(
+        "  \u{2551}  {}{:>width$}  \u{2551}",
+        port_label,
+        port_str.green(),
+        width = port_value_width,
+    );
+
+    let profile_label = "Profile: ";
+    let profile_value_width = inner_width.saturating_sub(profile_label.len() + 4);
+    let profile_line = format!(
+        "  \u{2551}  {}{:>width$}  \u{2551}",
+        profile_label,
+        profile.bold().yellow(),
+        width = profile_value_width,
+    );
+
+    let top    = format!("  \u{2554}{}\u{2557}", "\u{2550}".repeat(inner_width));
+    let divider = format!("  \u{2560}{}\u{2563}", "\u{2550}".repeat(inner_width));
+    let bottom = format!("  \u{255a}{}\u{255d}", "\u{2550}".repeat(inner_width));
+
     format!(
-        r#"
-╔══════════════════════════════════════════╗
-║            {title}              ║
-║       {subtitle}              ║
-║                                          ║
-║  Port:    {port:<30}  ║
-║  Profile: {profile:<30}  ║
-╚══════════════════════════════════════════╝
-"#,
+        "\n{top}\n{title_line}\n{divider}\n{port_line}\n{profile_line}\n{bottom}\n"
     )
 }

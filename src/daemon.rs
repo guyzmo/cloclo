@@ -72,9 +72,28 @@ pub fn start_daemon(
         cmd.args(["-P", &port_val.to_string()]);
     }
 
-    // Detach the child process.
-    cmd.stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+    // Redirect daemon output to a log file instead of /dev/null.
+    let log_path = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("cloclo")
+        .join("cloclo.log");
+
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| ClocloError::Daemon(format!("Failed to open log file: {}", e)))?;
+
+    let log_file_err = log_file
+        .try_clone()
+        .map_err(|e| ClocloError::Daemon(format!("Failed to clone log handle: {}", e)))?;
+
+    cmd.stdout(log_file)
+        .stderr(log_file_err)
         .stdin(std::process::Stdio::null());
 
     let child = cmd.spawn().map_err(|e| {
@@ -98,8 +117,30 @@ pub fn start_daemon(
     Ok(())
 }
 
-/// Stops a running daemon by sending SIGTERM via `kill`.
+/// Stops a running daemon, trying a graceful HTTP shutdown first, then SIGTERM.
 pub fn stop_daemon(pid_path: &PathBuf) -> Result<(), ClocloError> {
+    // Try graceful shutdown via the control API first.
+    if let Ok(config) = crate::config::load_config() {
+        let port = config.general.port;
+        let url = format!("http://127.0.0.1:{}/_cloclo/stop", port);
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+            .unwrap();
+
+        if client
+            .post(&url)
+            .send()
+            .map(|r| r.status().is_success())
+            .unwrap_or(false)
+        {
+            let _ = std::fs::remove_file(pid_path);
+            println!("{}", crate::chanson::farewell());
+            return Ok(());
+        }
+    }
+
+    // Fall back to SIGTERM.
     let pid = is_proxy_running(pid_path).ok_or_else(|| {
         ClocloError::Daemon("No running proxy found.".to_string())
     })?;
@@ -111,12 +152,9 @@ pub fn stop_daemon(pid_path: &PathBuf) -> Result<(), ClocloError> {
 
     if status.success() {
         let _ = std::fs::remove_file(pid_path);
-        println!("Proxy (PID {}) stopped.", pid);
+        println!("{}", crate::chanson::farewell());
         Ok(())
     } else {
-        Err(ClocloError::Daemon(format!(
-            "Failed to stop process with PID {}",
-            pid
-        )))
+        Err(ClocloError::Daemon(format!("Failed to stop PID {}", pid)))
     }
 }

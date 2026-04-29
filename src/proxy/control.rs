@@ -26,6 +26,7 @@ pub struct SwitchResponse {
 pub struct StatusResponse {
     pub active_profile: String,
     pub upstream_url: String,
+    pub model: Option<String>,
     pub stats: StatsResponse,
     pub profiles: Vec<String>,
 }
@@ -45,10 +46,19 @@ pub async fn get_status(
     let state = alexandrie.read().await;
     let uptime = state.stats.started_at.map(|s| s.elapsed().as_secs());
     let profiles: Vec<String> = state.config.profiles.keys().cloned().collect();
+    let model = state.config.profiles.get(&state.active_profile).and_then(|p| {
+        match p {
+            crate::config::ProfileConfig::ApiKey { model, .. } => model.clone(),
+            crate::config::ProfileConfig::OAuth { model, .. } => model.clone(),
+            crate::config::ProfileConfig::EnterpriseSso { model, .. } => model.clone(),
+            crate::config::ProfileConfig::Proxy { model, .. } => model.clone(),
+        }
+    });
 
     Ok(Json(StatusResponse {
         active_profile: state.active_profile.clone(),
         upstream_url: state.upstream_url.clone(),
+        model,
         stats: StatsResponse {
             requests_forwarded: state.stats.requests_forwarded,
             profile_switches: state.stats.profile_switches,
@@ -69,6 +79,36 @@ pub async fn switch_profile(
         .map_err(|e| ProxyError::ProfileNotFound(e.to_string()))?;
 
     let previous = state.active_profile.clone();
+
+    // Handle subprocess lifecycle
+    let new_profile_cfg = state.config.profiles.get(&req.profile).cloned();
+    let needs_subprocess = matches!(
+        &new_profile_cfg,
+        Some(crate::config::ProfileConfig::Proxy { subprocess: Some(_), .. })
+    );
+
+    // Kill existing subprocess if switching away from it
+    if let Some(ref mut existing) = state.managed_subprocess {
+        if existing.profile_name != req.profile {
+            let _ = existing.child.kill().await;
+            state.managed_subprocess = None;
+        }
+    }
+
+    // Spawn new subprocess if needed
+    if needs_subprocess && state.managed_subprocess.is_none() {
+        if let Some(crate::config::ProfileConfig::Proxy { subprocess: Some(ref sub_cfg), .. }) = new_profile_cfg {
+            match crate::subprocess::spawn_and_wait_healthy(sub_cfg, &req.profile).await {
+                Ok(child) => {
+                    state.managed_subprocess = Some(child);
+                }
+                Err(e) => {
+                    return Err(ProxyError::Internal(format!("Failed to start subprocess: {}", e)));
+                }
+            }
+        }
+    }
+
     state.active_profile = req.profile.clone();
     state.active_auth = auth;
     state.upstream_url = upstream_url;

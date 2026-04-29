@@ -9,6 +9,7 @@ mod proxy;
 mod subprocess;
 
 use clap::Parser;
+use colored::Colorize;
 use tracing_subscriber::EnvFilter;
 
 use crate::cli::{Cli, Commands};
@@ -18,18 +19,33 @@ use crate::launch::{launch_claude, list_profiles, show_status, switch_profile_cl
 use crate::proxy::server;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() {
     // Initialize tracing.
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
+    if let Err(e) = run().await {
+        eprintln!("{} {}", "Error:".bold().red(), e);
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
         Commands::Init { force } => {
             init_config(force).map_err(anyhow::Error::from)?;
-            println!("Configuration initialized at {}", config::config_path().display());
+            let path = config::config_path();
+            println!(
+                "{} Configuration created at {}",
+                "->".bold().green(),
+                path.display()
+            );
+            println!("  Edit the file to configure your profiles, then run:");
+            println!("  {} to start the proxy", "cloclo start".bold());
+            println!("  {} to launch Claude", "cloclo launch".bold());
             Ok(())
         }
 
@@ -51,12 +67,8 @@ async fn main() -> anyhow::Result<()> {
                     .map_err(anyhow::Error::from)?;
             } else {
                 let pid_path = pid_file_path(config.general.pid_file.as_ref());
-                start_daemon(
-                    Some(&profile_name),
-                    Some(port),
-                    &pid_path,
-                )
-                .map_err(anyhow::Error::from)?;
+                start_daemon(Some(&profile_name), Some(port), &pid_path)
+                    .map_err(anyhow::Error::from)?;
             }
             Ok(())
         }

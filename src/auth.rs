@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::config::{ClocloConfig, ProfileConfig, SecretSource};
 use crate::error::ClocloError;
@@ -6,6 +6,16 @@ use crate::proxy::state::ResolvedAuth;
 
 /// Default Anthropic API base URL.
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
+
+/// Expands a leading `~` to the user's home directory.
+fn expand_tilde(path: &Path) -> PathBuf {
+    if let Ok(stripped) = path.strip_prefix("~") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(stripped);
+        }
+    }
+    path.to_path_buf()
+}
 
 /// Resolves authentication credentials and upstream URL for the given profile name.
 ///
@@ -70,17 +80,25 @@ pub fn resolve_profile(
 
 /// Reads a bearer/OAuth token from a file, trimming whitespace.
 pub fn read_token_file(path: &Path) -> Result<String, ClocloError> {
-    let contents = std::fs::read_to_string(path).map_err(|e| {
-        ClocloError::Auth(format!("Failed to read token file {}: {}", path.display(), e))
+    let expanded = expand_tilde(path);
+    let contents = std::fs::read_to_string(&expanded).map_err(|e| {
+        ClocloError::Auth(format!("Failed to read token file {}: {}", expanded.display(), e))
     })?;
-    Ok(contents.trim().to_string())
+    let trimmed = contents.trim().to_string();
+    if trimmed.is_empty() {
+        return Err(ClocloError::Auth(format!("Token file is empty: {}", expanded.display())));
+    }
+    Ok(trimmed)
 }
 
 /// Resolves a `SecretSource` to its plaintext value.
 pub fn resolve_secret(source: &SecretSource) -> Result<String, ClocloError> {
     match source {
         SecretSource::Literal(value) => Ok(value.clone()),
-        SecretSource::File { file } => read_token_file(file),
+        SecretSource::File { file } => {
+            let expanded = expand_tilde(file);
+            read_token_file(&expanded)
+        }
         SecretSource::Env { env } => std::env::var(env).map_err(|e| {
             ClocloError::Auth(format!("Environment variable '{}' not set: {}", env, e))
         }),

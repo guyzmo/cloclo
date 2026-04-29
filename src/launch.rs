@@ -26,22 +26,78 @@ pub fn launch_claude(
         .as_deref()
         .unwrap_or_else(|| std::path::Path::new("claude"));
 
+    // Check if the proxy is running; auto-start if not.
+    let health_url = format!("http://127.0.0.1:{}/_cloclo/health", port);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .unwrap();
+
+    let proxy_running = client
+        .get(&health_url)
+        .send()
+        .map(|r| r.status().is_success())
+        .unwrap_or(false);
+
+    if !proxy_running {
+        println!(
+            "{} Proxy not running, starting daemon...",
+            "->".bold().yellow()
+        );
+        let pid_path = crate::daemon::pid_file_path(config.general.pid_file.as_ref());
+        crate::daemon::start_daemon(Some(&profile_name), Some(port), &pid_path)?;
+        // Wait for proxy to become ready.
+        let mut ready = false;
+        for _ in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            if client
+                .get(&health_url)
+                .send()
+                .map(|r| r.status().is_success())
+                .unwrap_or(false)
+            {
+                println!("{} Proxy is ready!", "->".bold().green());
+                ready = true;
+                break;
+            }
+        }
+        if !ready {
+            println!(
+                "{} Proxy may not be ready yet, launching Claude anyway...",
+                "->".bold().yellow()
+            );
+        }
+    }
+
+    // Switch to the requested profile.
+    let switch_url = format!("http://127.0.0.1:{}/_cloclo/switch", port);
+    let _ = client
+        .post(&switch_url)
+        .json(&serde_json::json!({ "profile": profile_name }))
+        .send();
+
     println!(
-        "{} Launching Claude Code with profile '{}'",
+        "{} {} {} {} {}",
         "->".bold().green(),
-        profile_name.bold()
+        "Comme d'habitude —".italic(),
+        "launching Claude Code with profile".bold().green(),
+        profile_name.bold().cyan(),
+        "via le proxy magnifique!".italic()
     );
 
     // Set the API base URL to point at our proxy.
     let proxy_url = format!("http://127.0.0.1:{}", port);
 
-    let status = std::process::Command::new(claude_bin)
-        .args(claude_args)
-        .env("ANTHROPIC_BASE_URL", &proxy_url)
-        .status()
-        .map_err(|e| {
-            ClocloError::Subprocess(format!("Failed to launch Claude Code: {}", e))
-        })?;
+    let mut cmd = std::process::Command::new(claude_bin);
+    cmd.args(claude_args);
+    cmd.env("ANTHROPIC_BASE_URL", &proxy_url);
+    cmd.env("ANTHROPIC_AUTH_TOKEN", "cloclo-proxy");
+    // Remove conflicting env vars.
+    cmd.env_remove("ANTHROPIC_API_KEY");
+
+    let status = cmd.status().map_err(|e| {
+        ClocloError::Subprocess(format!("Failed to launch Claude Code: {}", e))
+    })?;
 
     if !status.success() {
         return Err(ClocloError::Subprocess(format!(

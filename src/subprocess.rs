@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use tokio::process::Command;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::config::SubprocessConfig;
 use crate::error::ClocloError;
@@ -30,32 +30,32 @@ pub async fn spawn_and_wait_healthy(
             ))
         })?;
 
-    // Poll the health port until it responds or we time out.
+    // Poll the health port via TCP connect until it accepts connections or we time out.
     let timeout = Duration::from_secs(subprocess_config.startup_timeout_secs);
     let start = std::time::Instant::now();
-    let health_url = format!("http://127.0.0.1:{}/health", subprocess_config.health_port);
-
-    let client = reqwest::Client::new();
 
     loop {
         if start.elapsed() > timeout {
             return Err(ClocloError::Subprocess(format!(
-                "Subprocess did not become healthy within {} seconds",
-                subprocess_config.startup_timeout_secs
+                "Subprocess '{}' did not become healthy within {} seconds",
+                subprocess_config.command, subprocess_config.startup_timeout_secs
             )));
         }
 
-        match client.get(&health_url).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                info!("Subprocess is healthy on port {}", subprocess_config.health_port);
+        match tokio::net::TcpStream::connect(format!(
+            "127.0.0.1:{}",
+            subprocess_config.health_port
+        ))
+        .await
+        {
+            Ok(_) => {
+                info!(
+                    "Subprocess '{}' is ready on port {}",
+                    subprocess_config.command, subprocess_config.health_port
+                );
                 break;
             }
-            Ok(_) => {
-                warn!("Subprocess health check returned non-success, retrying...");
-            }
-            Err(_) => {
-                // Not ready yet.
-            }
+            Err(_) => {}
         }
 
         tokio::time::sleep(Duration::from_millis(250)).await;

@@ -1,6 +1,8 @@
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::HeaderMap;
+use axum::http::Method;
+use axum::http::Uri;
 use axum::response::Response;
 use bytes::Bytes;
 use futures::TryStreamExt;
@@ -128,6 +130,95 @@ pub async fn forward_json(
     builder
         .body(Body::from(resp_bytes))
         .map_err(|e| ProxyError::Internal(e.to_string()))
+}
+
+/// Handles GET requests (like /v1/models) and forwards them upstream.
+pub async fn forward_get(
+    State(alexandrie): State<Alexandrie>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Result<Response, ProxyError> {
+    let (auth, upstream_url, client) = {
+        let mut state = alexandrie.write().await;
+        state.stats.requests_forwarded += 1;
+        (state.active_auth.clone(), state.upstream_url.clone(), state.client.clone())
+    };
+
+    let path = uri.path();
+    let url = format!("{}{}", upstream_url.trim_end_matches('/'), path);
+
+    let mut req_builder = client.get(&url);
+    req_builder = inject_auth(req_builder, &auth);
+
+    if let Some(av) = headers.get("anthropic-version") {
+        req_builder = req_builder.header("anthropic-version", av);
+    }
+
+    let response = req_builder.send().await?;
+    let status = response.status();
+    let resp_headers = response.headers().clone();
+    let resp_bytes = response.bytes().await?;
+
+    let mut builder = Response::builder().status(status.as_u16());
+    for (key, value) in resp_headers.iter() {
+        builder = builder.header(key, value);
+    }
+    builder.body(Body::from(resp_bytes)).map_err(|e| ProxyError::Internal(e.to_string()))
+}
+
+/// Catches any unmatched request and forwards it upstream.
+pub async fn forward_fallback(
+    State(alexandrie): State<Alexandrie>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ProxyError> {
+    let (auth, upstream_url, client) = {
+        let mut state = alexandrie.write().await;
+        state.stats.requests_forwarded += 1;
+        (state.active_auth.clone(), state.upstream_url.clone(), state.client.clone())
+    };
+
+    let path = uri.path();
+    let url = format!("{}{}", upstream_url.trim_end_matches('/'), path);
+
+    let mut req_builder = client.request(method, &url)
+        .header("content-type", "application/json")
+        .body(body);
+
+    req_builder = inject_auth(req_builder, &auth);
+
+    if let Some(av) = headers.get("anthropic-version") {
+        req_builder = req_builder.header("anthropic-version", av);
+    }
+
+    let response = req_builder.send().await?;
+    let is_sse = response.headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .map(|ct| ct.contains("text/event-stream"))
+        .unwrap_or(false);
+
+    let status = response.status();
+    let resp_headers = response.headers().clone();
+
+    if is_sse {
+        let stream = response.bytes_stream().map_err(|e| std::io::Error::other(e));
+        let body = Body::from_stream(stream);
+        let mut builder = Response::builder().status(status.as_u16());
+        for (key, value) in resp_headers.iter() {
+            builder = builder.header(key, value);
+        }
+        builder.body(body).map_err(|e| ProxyError::Internal(e.to_string()))
+    } else {
+        let resp_bytes = response.bytes().await?;
+        let mut builder = Response::builder().status(status.as_u16());
+        for (key, value) in resp_headers.iter() {
+            builder = builder.header(key, value);
+        }
+        builder.body(Body::from(resp_bytes)).map_err(|e| ProxyError::Internal(e.to_string()))
+    }
 }
 
 /// Injects the appropriate authentication header into a request builder.

@@ -4,7 +4,20 @@ use clap::{Parser, Subcommand};
 ///
 /// Multi-profile authentication proxy and launcher.
 #[derive(Debug, Parser)]
-#[command(name = "cloclo", version, about)]
+#[command(
+    name = "cloclo",
+    version,
+    about,
+    long_about = "Cloclo — le proxy magnifique\n\
+        \n\
+        A multi-profile authentication proxy and launcher for Claude Code.\n\
+        Manage multiple Anthropic API keys, OAuth tokens, enterprise SSO credentials,\n\
+        and third-party proxies (e.g. GitHub Copilot) from a single config file.\n\
+        \n\
+        Run `cloclo init` to generate a starter config, then `cloclo start` (or `cloclo up`)\n\
+        to start the proxy, and `cloclo launch` (or `cloclo go`) to open Claude Code\n\
+        through the active profile."
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -20,6 +33,7 @@ pub enum Commands {
     },
 
     /// Start the proxy server.
+    #[command(alias = "up")]
     Start {
         /// Profile to activate on startup.
         #[arg(short, long)]
@@ -35,9 +49,11 @@ pub enum Commands {
     },
 
     /// Stop a running proxy daemon.
+    #[command(alias = "down")]
     Stop,
 
     /// Switch the active profile on a running proxy.
+    #[command(alias = "sw")]
     Switch {
         /// Name of the profile to switch to.
         profile: String,
@@ -47,9 +63,11 @@ pub enum Commands {
     Status,
 
     /// List all configured profiles.
+    #[command(alias = "ls")]
     Profiles,
 
     /// Launch Claude Code with a specific profile through the proxy.
+    #[command(alias = "go")]
     Launch {
         /// Profile to use.
         #[arg(short, long)]

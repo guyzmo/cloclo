@@ -96,6 +96,27 @@ impl ProfileConfig {
             ProfileConfig::Proxy { display_name, .. } => display_name,
         }
     }
+
+    /// Returns the model override for this profile, if set.
+    pub fn model(&self) -> Option<&str> {
+        match self {
+            ProfileConfig::ApiKey { model, .. } => model.as_deref(),
+            ProfileConfig::OAuth { model, .. } => model.as_deref(),
+            ProfileConfig::EnterpriseSso { model, .. } => model.as_deref(),
+            ProfileConfig::Proxy { model, .. } => model.as_deref(),
+        }
+    }
+
+    /// Returns the base URL override for this profile, if set.
+    /// Proxy profiles always use their upstream_url, so this returns None for them.
+    pub fn base_url(&self) -> Option<&str> {
+        match self {
+            ProfileConfig::ApiKey { base_url, .. } => base_url.as_deref(),
+            ProfileConfig::OAuth { base_url, .. } => base_url.as_deref(),
+            ProfileConfig::EnterpriseSso { base_url, .. } => base_url.as_deref(),
+            ProfileConfig::Proxy { .. } => None,
+        }
+    }
 }
 
 /// How to retrieve a secret value: literal string, file path, or environment variable.
@@ -161,15 +182,46 @@ pub fn init_config(force: bool) -> Result<(), ClocloError> {
         std::fs::create_dir_all(parent)?;
     }
 
-    let default_config = r#"[general]
+    let default_config = r#"# Cloclo — le proxy magnifique
+# Multi-profile proxy and launcher for Claude Code
+
+[general]
 port = 9393
 bind = "127.0.0.1"
-default_profile = "default"
+default_profile = "personal"
+# claude_bin = "/usr/local/bin/claude"
 
-[profiles.default]
+# Personal Pro Account (OAuth token)
+[profiles.personal]
+type = "oauth"
+display_name = "Personal Pro (Comme d'habitude)"
+token_file = "~/.claude/personal-pro-token"
+
+# Work API Key
+[profiles.work]
 type = "api_key"
-display_name = "Default API Key"
-api_key = "sk-ant-REPLACE_ME"
+display_name = "Work API Key (Le Lundi au Soleil)"
+api_key = { env = "ANTHROPIC_API_KEY" }
+
+# Enterprise SSO
+[profiles.enterprise]
+type = "enterprise_sso"
+display_name = "Enterprise SSO (Alexandrie Alexandra)"
+token_file = "~/.claude/enterprise-token"
+
+# GitHub Copilot (via copilot-api)
+[profiles.copilot]
+type = "proxy"
+display_name = "GitHub Copilot (Le Telephone Pleure)"
+upstream_url = "http://localhost:4141"
+auth_token = "sk-dummy"
+model = "claude-sonnet-4-6"
+
+[profiles.copilot.subprocess]
+command = "copilot-api"
+args = []
+health_port = 4141
+startup_timeout_secs = 15
 "#;
 
     std::fs::write(&path, default_config)?;
