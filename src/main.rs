@@ -1,22 +1,12 @@
-mod auth;
-mod chanson;
-mod cli;
-mod config;
-mod daemon;
-mod error;
-mod launch;
-mod proxy;
-mod subprocess;
-
 use clap::Parser;
 use colored::Colorize;
 use tracing_subscriber::EnvFilter;
 
-use crate::cli::{Cli, Commands};
-use crate::config::{init_config, load_config};
-use crate::daemon::{pid_file_path, start_daemon, stop_daemon};
-use crate::launch::{launch_claude, list_profiles, show_status, switch_profile_cli};
-use crate::proxy::server;
+use cloclo::cli::{Cli, Commands};
+use cloclo::config::{config_path, init_config, load_config};
+use cloclo::daemon::{pid_file_path, start_daemon, stop_daemon};
+use cloclo::launch::{launch_claude, list_profiles, show_status, switch_profile_cli};
+use cloclo::proxy::server;
 
 #[tokio::main]
 async fn main() {
@@ -37,7 +27,7 @@ async fn run() -> anyhow::Result<()> {
     match cli.command {
         Commands::Init { force } => {
             init_config(force).map_err(anyhow::Error::from)?;
-            let path = config::config_path();
+            let path = config_path();
             println!(
                 "{} Configuration created at {}",
                 "->".bold().green(),
@@ -76,17 +66,17 @@ async fn run() -> anyhow::Result<()> {
         Commands::Stop => {
             let config = load_config().map_err(anyhow::Error::from)?;
             let pid_path = pid_file_path(config.general.pid_file.as_ref());
-            stop_daemon(&pid_path).map_err(anyhow::Error::from)?;
+            stop_daemon(&pid_path).await.map_err(anyhow::Error::from)?;
             Ok(())
         }
 
         Commands::Switch { profile } => {
-            switch_profile_cli(&profile).map_err(anyhow::Error::from)?;
+            switch_profile_cli(&profile).await.map_err(anyhow::Error::from)?;
             Ok(())
         }
 
         Commands::Status => {
-            show_status().map_err(anyhow::Error::from)?;
+            show_status().await.map_err(anyhow::Error::from)?;
             Ok(())
         }
 
@@ -100,7 +90,7 @@ async fn run() -> anyhow::Result<()> {
             profile,
             claude_args,
         } => {
-            launch_claude(profile.as_deref(), &claude_args).map_err(anyhow::Error::from)?;
+            launch_claude(profile.as_deref(), &claude_args).await.map_err(anyhow::Error::from)?;
             Ok(())
         }
     }

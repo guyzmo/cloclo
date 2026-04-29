@@ -45,9 +45,13 @@ pub async fn forward_messages(
     // Inject auth headers.
     req_builder = inject_auth(req_builder, &auth);
 
-    // Forward select headers from the original request.
-    if let Some(anthropic_version) = headers.get("anthropic-version") {
-        req_builder = req_builder.header("anthropic-version", anthropic_version);
+    // Forward all client headers except ones we manage ourselves.
+    for (name, value) in &headers {
+        let n = name.as_str().to_ascii_lowercase();
+        if n == "host" || n == "x-api-key" || n == "authorization" || n == "content-length" {
+            continue;
+        }
+        req_builder = req_builder.header(name, value);
     }
 
     // Send upstream.
@@ -92,6 +96,7 @@ pub async fn forward_messages(
 /// Generic JSON forwarding for arbitrary paths.
 pub async fn forward_json(
     State(alexandrie): State<Alexandrie>,
+    uri: Uri,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ProxyError> {
@@ -105,7 +110,8 @@ pub async fn forward_json(
         )
     };
 
-    let url = upstream_url.trim_end_matches('/').to_string();
+    let path = uri.path();
+    let url = format!("{}{}", upstream_url.trim_end_matches('/'), path);
 
     let mut req_builder = client
         .post(&url)
@@ -114,8 +120,13 @@ pub async fn forward_json(
 
     req_builder = inject_auth(req_builder, &auth);
 
-    if let Some(anthropic_version) = headers.get("anthropic-version") {
-        req_builder = req_builder.header("anthropic-version", anthropic_version);
+    // Forward all client headers except ones we manage ourselves.
+    for (name, value) in &headers {
+        let n = name.as_str().to_ascii_lowercase();
+        if n == "host" || n == "x-api-key" || n == "authorization" || n == "content-length" {
+            continue;
+        }
+        req_builder = req_builder.header(name, value);
     }
 
     let response = req_builder.send().await?;
@@ -150,8 +161,13 @@ pub async fn forward_get(
     let mut req_builder = client.get(&url);
     req_builder = inject_auth(req_builder, &auth);
 
-    if let Some(av) = headers.get("anthropic-version") {
-        req_builder = req_builder.header("anthropic-version", av);
+    // Forward all client headers except ones we manage ourselves.
+    for (name, value) in &headers {
+        let n = name.as_str().to_ascii_lowercase();
+        if n == "host" || n == "x-api-key" || n == "authorization" || n == "content-length" {
+            continue;
+        }
+        req_builder = req_builder.header(name, value);
     }
 
     let response = req_builder.send().await?;
@@ -189,8 +205,13 @@ pub async fn forward_fallback(
 
     req_builder = inject_auth(req_builder, &auth);
 
-    if let Some(av) = headers.get("anthropic-version") {
-        req_builder = req_builder.header("anthropic-version", av);
+    // Forward all client headers except ones we manage ourselves.
+    for (name, value) in &headers {
+        let n = name.as_str().to_ascii_lowercase();
+        if n == "host" || n == "x-api-key" || n == "authorization" || n == "content-length" {
+            continue;
+        }
+        req_builder = req_builder.header(name, value);
     }
 
     let response = req_builder.send().await?;

@@ -4,8 +4,16 @@ use crate::chanson::switching_quote;
 use crate::config::{load_config, ClocloConfig};
 use crate::error::ClocloError;
 
+/// Async HTTP client for control API calls (avoids reqwest::blocking panic inside tokio).
+fn control_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .unwrap()
+}
+
 /// Launches Claude Code with the proxy configured, optionally starting the proxy first.
-pub fn launch_claude(
+pub async fn launch_claude(
     profile: Option<&str>,
     claude_args: &[String],
 ) -> Result<(), ClocloError> {
@@ -28,14 +36,12 @@ pub fn launch_claude(
 
     // Check if the proxy is running; auto-start if not.
     let health_url = format!("http://127.0.0.1:{}/_cloclo/health", port);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-        .unwrap();
+    let client = control_client();
 
     let proxy_running = client
         .get(&health_url)
         .send()
+        .await
         .map(|r| r.status().is_success())
         .unwrap_or(false);
 
@@ -49,10 +55,11 @@ pub fn launch_claude(
         // Wait for proxy to become ready.
         let mut ready = false;
         for _ in 0..20 {
-            std::thread::sleep(std::time::Duration::from_millis(250));
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             if client
                 .get(&health_url)
                 .send()
+                .await
                 .map(|r| r.status().is_success())
                 .unwrap_or(false)
             {
@@ -74,7 +81,8 @@ pub fn launch_claude(
     let _ = client
         .post(&switch_url)
         .json(&serde_json::json!({ "profile": profile_name }))
-        .send();
+        .send()
+        .await;
 
     println!(
         "{} {} {} {} {}",
@@ -91,9 +99,11 @@ pub fn launch_claude(
     let mut cmd = std::process::Command::new(claude_bin);
     cmd.args(claude_args);
     cmd.env("ANTHROPIC_BASE_URL", &proxy_url);
-    cmd.env("ANTHROPIC_AUTH_TOKEN", "cloclo-proxy");
-    // Remove conflicting env vars.
-    cmd.env_remove("ANTHROPIC_API_KEY");
+    // Set a dummy API key that passes Claude Code's format validation.
+    // The proxy handles real auth; this value is never sent to Anthropic.
+    cmd.env("ANTHROPIC_API_KEY", "sk-cloclo-proxy");
+    // Remove any conflicting auth token env var.
+    cmd.env_remove("ANTHROPIC_AUTH_TOKEN");
 
     let status = cmd.status().map_err(|e| {
         ClocloError::Subprocess(format!("Failed to launch Claude Code: {}", e))
@@ -110,16 +120,17 @@ pub fn launch_claude(
 }
 
 /// Switches the profile on a running proxy via the control API.
-pub fn switch_profile_cli(profile: &str) -> Result<(), ClocloError> {
+pub async fn switch_profile_cli(profile: &str) -> Result<(), ClocloError> {
     let config = load_config()?;
     let port = config.general.port;
     let url = format!("http://127.0.0.1:{}/_cloclo/switch", port);
 
-    let client = reqwest::blocking::Client::new();
+    let client = control_client();
     let resp = client
         .post(&url)
         .json(&serde_json::json!({ "profile": profile }))
         .send()
+        .await
         .map_err(|e| {
             ClocloError::Proxy(format!(
                 "Failed to contact proxy (is it running?): {}",
@@ -128,7 +139,7 @@ pub fn switch_profile_cli(profile: &str) -> Result<(), ClocloError> {
         })?;
 
     if resp.status().is_success() {
-        let body: serde_json::Value = resp.json().map_err(|e| {
+        let body: serde_json::Value = resp.json().await.map_err(|e| {
             ClocloError::Proxy(format!("Invalid response: {}", e))
         })?;
         println!("{} {}", "->".bold().green(), switching_quote());
@@ -138,7 +149,7 @@ pub fn switch_profile_cli(profile: &str) -> Result<(), ClocloError> {
             body["current"].as_str().unwrap_or("?"),
         );
     } else {
-        let body = resp.text().unwrap_or_default();
+        let body = resp.text().await.unwrap_or_default();
         return Err(ClocloError::Proxy(format!("Switch failed: {}", body)));
     }
 
@@ -146,13 +157,13 @@ pub fn switch_profile_cli(profile: &str) -> Result<(), ClocloError> {
 }
 
 /// Shows the status of the running proxy.
-pub fn show_status() -> Result<(), ClocloError> {
+pub async fn show_status() -> Result<(), ClocloError> {
     let config = load_config()?;
     let port = config.general.port;
     let url = format!("http://127.0.0.1:{}/_cloclo/status", port);
 
-    let client = reqwest::blocking::Client::new();
-    let resp = client.get(&url).send().map_err(|e| {
+    let client = control_client();
+    let resp = client.get(&url).send().await.map_err(|e| {
         ClocloError::Proxy(format!(
             "Failed to contact proxy (is it running?): {}",
             e
@@ -160,7 +171,7 @@ pub fn show_status() -> Result<(), ClocloError> {
     })?;
 
     if resp.status().is_success() {
-        let body: serde_json::Value = resp.json().map_err(|e| {
+        let body: serde_json::Value = resp.json().await.map_err(|e| {
             ClocloError::Proxy(format!("Invalid response: {}", e))
         })?;
         println!("{}", "Cloclo Proxy Status".bold().underline());
@@ -191,7 +202,7 @@ pub fn show_status() -> Result<(), ClocloError> {
             println!("  Profiles:        {}", profiles.len());
         }
     } else {
-        let body = resp.text().unwrap_or_default();
+        let body = resp.text().await.unwrap_or_default();
         return Err(ClocloError::Proxy(format!("Status query failed: {}", body)));
     }
 

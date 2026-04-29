@@ -118,12 +118,12 @@ pub fn start_daemon(
 }
 
 /// Stops a running daemon, trying a graceful HTTP shutdown first, then SIGTERM.
-pub fn stop_daemon(pid_path: &PathBuf) -> Result<(), ClocloError> {
+pub async fn stop_daemon(pid_path: &PathBuf) -> Result<(), ClocloError> {
     // Try graceful shutdown via the control API first.
     if let Ok(config) = crate::config::load_config() {
         let port = config.general.port;
         let url = format!("http://127.0.0.1:{}/_cloclo/stop", port);
-        let client = reqwest::blocking::Client::builder()
+        let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(3))
             .build()
             .unwrap();
@@ -131,6 +131,7 @@ pub fn stop_daemon(pid_path: &PathBuf) -> Result<(), ClocloError> {
         if client
             .post(&url)
             .send()
+            .await
             .map(|r| r.status().is_success())
             .unwrap_or(false)
         {

@@ -219,7 +219,7 @@ model = "claude-sonnet-4-6"
 
 [profiles.copilot.subprocess]
 command = "copilot-api"
-args = []
+args = ["start", "--claude-code"]
 health_port = 4141
 startup_timeout_secs = 15
 "#;
