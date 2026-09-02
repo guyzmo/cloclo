@@ -261,7 +261,6 @@ fn inject_auth(
     auth: &ResolvedAuth,
 ) -> reqwest::RequestBuilder {
     match auth {
-        ResolvedAuth::ApiKey(key) => builder.header("x-api-key", key.as_str()),
         ResolvedAuth::BearerToken(token) => {
             builder.header("authorization", format!("Bearer {}", token))
         }

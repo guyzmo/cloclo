@@ -23,11 +23,6 @@ type = "oauth"
 display_name = "Personal Pro (Comme d'habitude)"
 token_file = "~/.claude/personal-pro-token"
 
-[profiles.work]
-type = "api_key"
-display_name = "Work API Key (Le Lundi au Soleil)"
-api_key = { env = "ANTHROPIC_API_KEY" }
-
 [profiles.enterprise]
 type = "enterprise_sso"
 display_name = "Enterprise SSO (Alexandrie Alexandra)"
@@ -47,8 +42,8 @@ auth_token = "sk-dummy"
     assert_eq!(config.general.bind, "127.0.0.1");
     assert_eq!(config.general.default_profile, "personal");
 
-    // Verify all 4 profiles are present
-    assert_eq!(config.profiles.len(), 4);
+    // Verify all 3 profiles are present
+    assert_eq!(config.profiles.len(), 3);
 
     // Verify personal profile (OAuth)
     assert!(config.profiles.contains_key("personal"));
@@ -56,14 +51,6 @@ auth_token = "sk-dummy"
         assert_eq!(display_name, "Personal Pro (Comme d'habitude)");
     } else {
         panic!("Expected OAuth profile");
-    }
-
-    // Verify work profile (API Key)
-    assert!(config.profiles.contains_key("work"));
-    if let ProfileConfig::ApiKey { display_name, .. } = &config.profiles["work"] {
-        assert_eq!(display_name, "Work API Key (Le Lundi au Soleil)");
-    } else {
-        panic!("Expected ApiKey profile");
     }
 
     // Verify enterprise profile (Enterprise SSO)
@@ -90,9 +77,9 @@ fn test_config_roundtrip() {
 
     profiles.insert(
         "test_profile".to_string(),
-        ProfileConfig::ApiKey {
+        ProfileConfig::OAuth {
             display_name: "Test Profile".to_string(),
-            api_key: SecretSource::Literal("test-key-123".to_string()),
+            token_file: PathBuf::from("~/test-token"),
             base_url: Some("https://test.example.com".to_string()),
             model: Some("claude-3-sonnet".to_string()),
         },
@@ -150,15 +137,6 @@ fn test_config_defaults() {
 
 #[test]
 fn test_profile_display_name() {
-    // Test ApiKey profile
-    let api_key_profile = ProfileConfig::ApiKey {
-        display_name: "My API Key Profile".to_string(),
-        api_key: SecretSource::Literal("key".to_string()),
-        base_url: None,
-        model: None,
-    };
-    assert_eq!(api_key_profile.display_name(), "My API Key Profile");
-
     // Test OAuth profile
     let oauth_profile = ProfileConfig::OAuth {
         display_name: "My OAuth Profile".to_string(),

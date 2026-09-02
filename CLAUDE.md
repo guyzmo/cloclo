@@ -41,8 +41,8 @@ cloclo stop              # Graceful shutdown
 ## Key Types
 
 - `Alexandrie` (`Arc<RwLock<ProxyState>>`) — shared proxy state
-- `ProfileConfig` — tagged enum: ApiKey, OAuth, EnterpriseSso, Proxy
-- `ResolvedAuth` — ApiKey, BearerToken, Passthrough
+- `ProfileConfig` — tagged enum: OAuth (personal), EnterpriseSso (enterprise), Proxy
+- `ResolvedAuth` — BearerToken, Passthrough
 - `SecretSource` — Literal, File, Env
 
 ## Testing

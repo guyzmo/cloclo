@@ -32,8 +32,6 @@ pub struct ProxyState {
 /// Resolved authentication — ready to inject into outgoing requests.
 #[derive(Debug, Clone)]
 pub enum ResolvedAuth {
-    /// Anthropic API key, sent as `x-api-key` header.
-    ApiKey(String),
     /// Bearer token (OAuth / SSO), sent as `Authorization: Bearer <token>`.
     BearerToken(String),
     /// Passthrough to an upstream proxy, optionally with a token.

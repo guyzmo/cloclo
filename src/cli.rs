@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
     about,
     long_about = "cloclo — multi-profile proxy for Claude Code\n\
         \n\
-        Manage Anthropic API keys, OAuth tokens, enterprise SSO,\n\
+        Manage personal and enterprise claude.ai accounts (OAuth tokens),\n\
         and third-party proxies (copilot-api, etc.) from one config.\n\
         Each `cloclo launch` spawns its own proxy on a random port.\n\
         Switch profiles or models mid-session with `cloclo sw` / `cloclo m`."

@@ -8,7 +8,7 @@ use crate::proxy::state::ResolvedAuth;
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 
 /// Expands a leading `~` to the user's home directory.
-fn expand_tilde(path: &Path) -> PathBuf {
+pub fn expand_tilde(path: &Path) -> PathBuf {
     if let Ok(stripped) = path.strip_prefix("~") {
         if let Some(home) = dirs::home_dir() {
             return home.join(stripped);
@@ -30,15 +30,6 @@ pub fn resolve_profile(
         .ok_or_else(|| ClocloError::ProfileNotFound(profile_name.to_string()))?;
 
     match profile {
-        ProfileConfig::ApiKey {
-            api_key, base_url, ..
-        } => {
-            let key = resolve_secret(api_key)?;
-            let url = base_url
-                .clone()
-                .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
-            Ok((ResolvedAuth::ApiKey(key), url))
-        }
         ProfileConfig::OAuth {
             token_file,
             base_url,

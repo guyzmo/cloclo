@@ -48,14 +48,12 @@ pub async fn get_status(
     let state = alexandrie.read().await;
     let uptime = state.stats.started_at.map(|s| s.elapsed().as_secs());
     let profiles: Vec<String> = state.config.profiles.keys().cloned().collect();
-    let model = state.config.profiles.get(&state.active_profile).and_then(|p| {
-        match p {
-            crate::config::ProfileConfig::ApiKey { model, .. } => model.clone(),
-            crate::config::ProfileConfig::OAuth { model, .. } => model.clone(),
-            crate::config::ProfileConfig::EnterpriseSso { model, .. } => model.clone(),
-            crate::config::ProfileConfig::Proxy { model, .. } => model.clone(),
-        }
-    });
+    let model = state
+        .config
+        .profiles
+        .get(&state.active_profile)
+        .and_then(|p| p.model())
+        .map(String::from);
 
     Ok(Json(StatusResponse {
         active_profile: state.active_profile.clone(),
@@ -172,14 +170,12 @@ pub async fn get_model(
     State(alexandrie): State<Alexandrie>,
 ) -> Result<Json<ModelResponse>, ProxyError> {
     let state = alexandrie.read().await;
-    let profile_model = state.config.profiles.get(&state.active_profile).and_then(|p| {
-        match p {
-            crate::config::ProfileConfig::ApiKey { model, .. } => model.clone(),
-            crate::config::ProfileConfig::OAuth { model, .. } => model.clone(),
-            crate::config::ProfileConfig::EnterpriseSso { model, .. } => model.clone(),
-            crate::config::ProfileConfig::Proxy { model, .. } => model.clone(),
-        }
-    });
+    let profile_model = state
+        .config
+        .profiles
+        .get(&state.active_profile)
+        .and_then(|p| p.model())
+        .map(String::from);
     let effective = state.model_override.clone()
         .or(profile_model.clone())
         .unwrap_or_else(|| "(upstream default)".to_string());
@@ -200,14 +196,12 @@ pub async fn set_model(
     let mut state = alexandrie.write().await;
     state.model_override = req.model;
 
-    let profile_model = state.config.profiles.get(&state.active_profile).and_then(|p| {
-        match p {
-            crate::config::ProfileConfig::ApiKey { model, .. } => model.clone(),
-            crate::config::ProfileConfig::OAuth { model, .. } => model.clone(),
-            crate::config::ProfileConfig::EnterpriseSso { model, .. } => model.clone(),
-            crate::config::ProfileConfig::Proxy { model, .. } => model.clone(),
-        }
-    });
+    let profile_model = state
+        .config
+        .profiles
+        .get(&state.active_profile)
+        .and_then(|p| p.model())
+        .map(String::from);
     let effective = state.model_override.clone()
         .or(profile_model.clone())
         .unwrap_or_else(|| "(upstream default)".to_string());

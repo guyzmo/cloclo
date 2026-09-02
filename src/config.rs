@@ -55,13 +55,6 @@ impl Default for GeneralConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ProfileConfig {
-    #[serde(rename = "api_key")]
-    ApiKey {
-        display_name: String,
-        api_key: SecretSource,
-        base_url: Option<String>,
-        model: Option<String>,
-    },
     #[serde(rename = "oauth")]
     OAuth {
         display_name: String,
@@ -90,7 +83,6 @@ impl ProfileConfig {
     /// Returns the human-readable display name for this profile.
     pub fn display_name(&self) -> &str {
         match self {
-            ProfileConfig::ApiKey { display_name, .. } => display_name,
             ProfileConfig::OAuth { display_name, .. } => display_name,
             ProfileConfig::EnterpriseSso { display_name, .. } => display_name,
             ProfileConfig::Proxy { display_name, .. } => display_name,
@@ -100,7 +92,6 @@ impl ProfileConfig {
     /// Returns the model override for this profile, if set.
     pub fn model(&self) -> Option<&str> {
         match self {
-            ProfileConfig::ApiKey { model, .. } => model.as_deref(),
             ProfileConfig::OAuth { model, .. } => model.as_deref(),
             ProfileConfig::EnterpriseSso { model, .. } => model.as_deref(),
             ProfileConfig::Proxy { model, .. } => model.as_deref(),
@@ -111,7 +102,6 @@ impl ProfileConfig {
     /// Proxy profiles always use their upstream_url, so this returns None for them.
     pub fn base_url(&self) -> Option<&str> {
         match self {
-            ProfileConfig::ApiKey { base_url, .. } => base_url.as_deref(),
             ProfileConfig::OAuth { base_url, .. } => base_url.as_deref(),
             ProfileConfig::EnterpriseSso { base_url, .. } => base_url.as_deref(),
             ProfileConfig::Proxy { .. } => None,
@@ -191,22 +181,16 @@ bind = "127.0.0.1"
 default_profile = "personal"
 # claude_bin = "/usr/local/bin/claude"
 
-# Personal Pro Account (OAuth token)
+# Personal claude.ai account (OAuth token)
 [profiles.personal]
 type = "oauth"
-display_name = "Personal Pro (Comme d'habitude)"
-token_file = "~/.claude/personal-pro-token"
+display_name = "Personal (Comme d'habitude)"
+token_file = "~/.claude/personal-token"
 
-# Work API Key
-[profiles.work]
-type = "api_key"
-display_name = "Work API Key (Le Lundi au Soleil)"
-api_key = { env = "ANTHROPIC_API_KEY" }
-
-# Enterprise SSO
+# Enterprise claude.ai account (SSO token)
 [profiles.enterprise]
 type = "enterprise_sso"
-display_name = "Enterprise SSO (Alexandrie Alexandra)"
+display_name = "Enterprise (Alexandrie Alexandra)"
 token_file = "~/.claude/enterprise-token"
 
 # GitHub Copilot (via copilot-api)
