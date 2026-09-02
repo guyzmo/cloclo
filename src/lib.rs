@@ -5,5 +5,6 @@ pub mod config;
 pub mod daemon;
 pub mod error;
 pub mod launch;
+pub mod login;
 pub mod proxy;
 pub mod subprocess;

@@ -49,6 +49,20 @@ pub enum Commands {
     #[command(alias = "down")]
     Stop,
 
+    /// Log into a claude.ai account and store its token for a profile.
+    ///
+    /// Runs `claude setup-token` (opens a browser login) and saves the
+    /// resulting OAuth token to the profile's token file. Pass --token to
+    /// store a token you already have instead of running the browser flow.
+    Login {
+        /// Name of the profile to log into (must be `oauth` or `enterprise_sso`).
+        profile: String,
+
+        /// Store this token directly instead of running `claude setup-token`.
+        #[arg(long)]
+        token: Option<String>,
+    },
+
     /// Switch the active profile on a running proxy.
     #[command(alias = "sw")]
     Switch {

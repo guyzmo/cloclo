@@ -6,6 +6,7 @@ use cloclo::cli::{Cli, Commands};
 use cloclo::config::{config_path, init_config, load_config};
 use cloclo::daemon::{pid_file_path, start_daemon, stop_daemon};
 use cloclo::launch::{launch_claude, list_profiles, set_model_cli, show_status, switch_profile_cli};
+use cloclo::login::login;
 use cloclo::proxy::server;
 
 #[tokio::main]
@@ -67,6 +68,12 @@ async fn run() -> anyhow::Result<()> {
             let config = load_config().map_err(anyhow::Error::from)?;
             let pid_path = pid_file_path(config.general.pid_file.as_ref());
             stop_daemon(&pid_path).await.map_err(anyhow::Error::from)?;
+            Ok(())
+        }
+
+        Commands::Login { profile, token } => {
+            let config = load_config().map_err(anyhow::Error::from)?;
+            login(&config, &profile, token).await.map_err(anyhow::Error::from)?;
             Ok(())
         }
 
