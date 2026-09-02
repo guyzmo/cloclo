@@ -1,4 +1,4 @@
-# cloclo — le proxy magnifique
+# cloclo 🕺 le proxy magnifique
 
 A multi-profile authentication proxy and launcher for [Claude Code](https://claude.com/claude-code).
 
@@ -15,7 +15,17 @@ Claude Code  →  cloclo proxy (127.0.0.1:9393)  →  Anthropic API / Enterprise
 
 ## Install
 
+Quick install via Claude Code:
+
 ```bash
+claude -p "build and install for me @guyzmo/cloclo from github"
+```
+
+Or manually:
+
+```bash
+git clone https://github.com/guyzmo/cloclo
+cd cloclo
 cargo build --release
 cp target/release/cloclo ~/bin/   # or anywhere on your PATH
 ```
