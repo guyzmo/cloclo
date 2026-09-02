@@ -61,6 +61,23 @@ automatically inside a `cloclo launch` session) or the long-running daemon
 from `cloclo start` if that variable isn't set. Run them from inside the
 session you want to affect.
 
+## Desktop app (Claude.app)
+
+Claude.app manages its own OAuth session directly — it doesn't read
+`ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`, so it can't be proxied like Claude
+Code. Instead, `cloclo desktop` gives each account its own isolated
+`--user-data-dir`:
+
+```bash
+cloclo desktop launch personal     # first run: opens the app logged out — log in normally
+cloclo desktop launch enterprise   # a second, independent, already-logged-in window
+cloclo desktop list                # shows each profile's login status
+```
+
+Because each profile is a separate data directory, both can be logged in and
+open **at the same time** as distinct windows — there's no "switching" step
+to run mid-session like with `cloclo sw`.
+
 ## Commands
 
 ```
@@ -73,6 +90,8 @@ cloclo status                      Show the active profile, model, and stats
 cloclo profiles                    Alias: ls — list configured profiles
 cloclo launch [--profile P] [args] Alias: go — launch Claude Code via a per-session proxy
 cloclo model [name]                Alias: m — set/clear a model override
+cloclo desktop launch <profile>    Launch Claude.app against a desktop profile
+cloclo desktop list                Alias: ls — list desktop profiles and login status
 ```
 
 ## Project structure
@@ -82,6 +101,7 @@ cloclo model [name]                Alias: m — set/clear a model override
 - `src/config.rs` — TOML config loading (`ProfileConfig` tagged enum)
 - `src/auth.rs` — token/key resolution with tilde expansion
 - `src/login.rs` — `cloclo login`, wraps `claude setup-token`
+- `src/desktop.rs` — `cloclo desktop`, launches Claude.app per isolated `--user-data-dir`
 - `src/proxy/` — axum-based proxy server (forward, control API, SSE bridge)
 - `src/launch.rs` — Claude Code launcher with auto-start
 - `src/daemon.rs` — PID file management, daemonization

@@ -98,4 +98,29 @@ pub enum Commands {
         /// Model name (e.g. "claude-opus-4-6"). Omit to clear the override.
         model: Option<String>,
     },
+
+    /// Manage Claude.app (desktop) accounts.
+    ///
+    /// Unlike `cloclo launch`, Claude.app isn't proxied — it manages its own
+    /// OAuth session directly. Each desktop profile gets an isolated
+    /// `--user-data-dir`, so multiple accounts can be logged in and open at
+    /// the same time as separate app windows.
+    #[command(subcommand)]
+    Desktop(DesktopCommands),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum DesktopCommands {
+    /// Launch Claude.app for a desktop profile.
+    ///
+    /// First launch opens the app logged out — log in normally in the
+    /// window that appears. Later launches reuse that session.
+    Launch {
+        /// Name of the desktop profile to launch.
+        profile: String,
+    },
+
+    /// List configured desktop profiles and their login status.
+    #[command(alias = "ls")]
+    List,
 }

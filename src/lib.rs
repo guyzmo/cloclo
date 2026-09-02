@@ -3,6 +3,7 @@ pub mod chanson;
 pub mod cli;
 pub mod config;
 pub mod daemon;
+pub mod desktop;
 pub mod error;
 pub mod launch;
 pub mod login;

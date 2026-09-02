@@ -2,9 +2,10 @@ use clap::Parser;
 use colored::Colorize;
 use tracing_subscriber::EnvFilter;
 
-use cloclo::cli::{Cli, Commands};
+use cloclo::cli::{Cli, Commands, DesktopCommands};
 use cloclo::config::{config_path, init_config, load_config};
 use cloclo::daemon::{pid_file_path, start_daemon, stop_daemon};
+use cloclo::desktop::{launch_desktop, list_desktop_profiles};
 use cloclo::launch::{launch_claude, list_profiles, set_model_cli, show_status, switch_profile_cli};
 use cloclo::login::login;
 use cloclo::proxy::server;
@@ -103,6 +104,18 @@ async fn run() -> anyhow::Result<()> {
 
         Commands::Model { model } => {
             set_model_cli(model.as_deref()).await.map_err(anyhow::Error::from)?;
+            Ok(())
+        }
+
+        Commands::Desktop(DesktopCommands::Launch { profile }) => {
+            let config = load_config().map_err(anyhow::Error::from)?;
+            launch_desktop(&config, &profile).await.map_err(anyhow::Error::from)?;
+            Ok(())
+        }
+
+        Commands::Desktop(DesktopCommands::List) => {
+            let config = load_config().map_err(anyhow::Error::from)?;
+            list_desktop_profiles(&config);
             Ok(())
         }
     }

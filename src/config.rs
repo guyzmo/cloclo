@@ -12,6 +12,10 @@ pub struct ClocloConfig {
     pub general: GeneralConfig,
     #[serde(default)]
     pub profiles: HashMap<String, ProfileConfig>,
+    /// Claude.app (desktop) profiles, keyed by name — separate from `profiles`
+    /// since the desktop app manages its own OAuth session and isn't proxied.
+    #[serde(default)]
+    pub desktop: HashMap<String, DesktopProfile>,
 }
 
 /// General proxy settings.
@@ -26,6 +30,8 @@ pub struct GeneralConfig {
     pub log_file: Option<PathBuf>,
     pub pid_file: Option<PathBuf>,
     pub claude_bin: Option<PathBuf>,
+    /// Path to the Claude.app bundle, for `cloclo desktop launch`.
+    pub desktop_app_path: Option<PathBuf>,
 }
 
 fn default_port() -> u16 {
@@ -47,8 +53,19 @@ impl Default for GeneralConfig {
             log_file: None,
             pid_file: None,
             claude_bin: None,
+            desktop_app_path: None,
         }
     }
+}
+
+/// A Claude.app (desktop) profile — an isolated `--user-data-dir`, not a
+/// proxied/token-based credential like `ProfileConfig`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DesktopProfile {
+    pub display_name: String,
+    /// Directory Claude.app should use for this profile's session data.
+    /// Defaults to `<data_dir>/cloclo/desktop/<profile_name>` when unset.
+    pub data_dir: Option<PathBuf>,
 }
 
 /// A profile configuration, tagged by type.
@@ -180,6 +197,7 @@ port = 9393
 bind = "127.0.0.1"
 default_profile = "personal"
 # claude_bin = "/usr/local/bin/claude"
+# desktop_app_path = "/Applications/Claude.app"
 
 # Personal claude.ai account (OAuth token)
 [profiles.personal]
@@ -206,6 +224,15 @@ command = "copilot-api"
 args = ["start", "--claude-code"]
 health_port = 4141
 startup_timeout_secs = 15
+
+# Claude.app (desktop) profiles — isolated data dirs, not proxied.
+# First `cloclo desktop launch <name>` creates the dir and opens the app for
+# you to log in normally; subsequent launches reuse that session.
+[desktop.personal]
+display_name = "Personal (Comme d'habitude)"
+
+[desktop.enterprise]
+display_name = "Enterprise (Alexandrie Alexandra)"
 "#;
 
     std::fs::write(&path, default_config)?;

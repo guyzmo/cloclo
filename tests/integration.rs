@@ -33,6 +33,13 @@ type = "proxy"
 display_name = "GitHub Copilot (Le Telephone Pleure)"
 upstream_url = "http://localhost:4141"
 auth_token = "sk-dummy"
+
+[desktop.personal]
+display_name = "Personal (Comme d'habitude)"
+
+[desktop.enterprise]
+display_name = "Enterprise (Alexandrie Alexandra)"
+data_dir = "/tmp/cloclo-desktop-enterprise"
 "#;
 
     let config: ClocloConfig = toml::from_str(config_toml).expect("Failed to parse config");
@@ -68,6 +75,15 @@ auth_token = "sk-dummy"
     } else {
         panic!("Expected Proxy profile");
     }
+
+    // Verify desktop profiles
+    assert_eq!(config.desktop.len(), 2);
+    assert_eq!(config.desktop["personal"].display_name, "Personal (Comme d'habitude)");
+    assert!(config.desktop["personal"].data_dir.is_none());
+    assert_eq!(
+        config.desktop["enterprise"].data_dir,
+        Some(PathBuf::from("/tmp/cloclo-desktop-enterprise"))
+    );
 }
 
 #[test]
@@ -93,8 +109,10 @@ fn test_config_roundtrip() {
             log_file: None,
             pid_file: None,
             claude_bin: None,
+            desktop_app_path: None,
         },
         profiles,
+        desktop: HashMap::new(),
     };
 
     // Serialize to TOML

@@ -34,6 +34,8 @@ cloclo stop              # Graceful shutdown
 - `src/auth.rs` — Token/key resolution with tilde expansion
 - `src/proxy/` — axum-based proxy server (forward, control, SSE bridge)
 - `src/launch.rs` — Claude Code launcher with auto-start
+- `src/login.rs` — `cloclo login`, wraps `claude setup-token`
+- `src/desktop.rs` — `cloclo desktop`, launches Claude.app per isolated `--user-data-dir`
 - `src/daemon.rs` — PID file management, daemonization
 - `src/subprocess.rs` — copilot-api subprocess lifecycle
 - `src/chanson.rs` — Claude François references
@@ -43,6 +45,7 @@ cloclo stop              # Graceful shutdown
 - `Alexandrie` (`Arc<RwLock<ProxyState>>`) — shared proxy state
 - `ProfileConfig` — tagged enum: OAuth (personal), EnterpriseSso (enterprise), Proxy
 - `ResolvedAuth` — BearerToken, Passthrough
+- `DesktopProfile` — Claude.app account: display_name + optional data_dir (not proxied, no auth resolution)
 - `SecretSource` — Literal, File, Env
 
 ## Testing
