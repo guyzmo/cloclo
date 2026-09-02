@@ -3,6 +3,7 @@ name = "cloclo"
 version = "0.1.0"
 edition = "2021"
 description = "Le proxy magnifique — multi-profile proxy and launcher for Claude Code"
+license = "WTFPL"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
