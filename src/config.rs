@@ -158,6 +158,14 @@ pub fn config_path() -> PathBuf {
         .join("config.toml")
 }
 
+/// Returns the path to the daemon's per-run secret file: `~/.config/cloclo/daemon.secret`.
+pub fn daemon_secret_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("cloclo")
+        .join("daemon.secret")
+}
+
 /// Loads the configuration from the default path.
 pub fn load_config() -> Result<ClocloConfig, ClocloError> {
     let path = config_path();

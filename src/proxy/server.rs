@@ -5,11 +5,11 @@ use tracing::info;
 
 use crate::auth::resolve_profile;
 use crate::chanson::{farewell, startup_banner};
-use crate::config::ClocloConfig;
+use crate::config::{daemon_secret_path, ClocloConfig};
 use crate::error::ClocloError;
 use crate::proxy::control;
 use crate::proxy::forward;
-use crate::proxy::middleware::with_logging;
+use crate::proxy::middleware::{require_secret, with_logging};
 use crate::proxy::state::{Alexandrie, ProxyState, SessionStats};
 
 /// Builds the Axum router with all routes.
@@ -31,6 +31,8 @@ pub fn build_router(
         .route("/stop", post(control::stop_server))
         .with_state(shutdown_tx);
 
+    let auth_state = alexandrie.clone();
+
     let proxy_routes = axum::Router::new()
         .route("/v1/messages", post(forward::forward_messages))
         .route("/v1/messages/count_tokens", post(forward::forward_json))
@@ -42,13 +44,21 @@ pub fn build_router(
     let app = axum::Router::new()
         .nest("/_cloclo", control_routes)
         .nest("/_cloclo", stop_route)
-        .merge(proxy_routes);
+        .merge(proxy_routes)
+        .layer(axum::middleware::from_fn_with_state(
+            auth_state,
+            require_secret,
+        ));
 
     with_logging(app)
 }
 
-/// Creates the shared proxy state from a config and profile name.
-fn create_state(config: ClocloConfig, profile_name: &str) -> Result<ProxyState, ClocloError> {
+/// Creates the shared proxy state from a config, profile name, and secret.
+fn create_state(
+    config: ClocloConfig,
+    profile_name: &str,
+    secret: String,
+) -> Result<ProxyState, ClocloError> {
     let (auth, upstream_url) = resolve_profile(&config, profile_name)?;
     Ok(ProxyState {
         active_profile: profile_name.to_string(),
@@ -64,14 +74,71 @@ fn create_state(config: ClocloConfig, profile_name: &str) -> Result<ProxyState, 
             profile_switches: 0,
             started_at: Some(std::time::Instant::now()),
         },
+        secret,
     })
+}
+
+/// Generates a 32-byte secret, hex-encoded as a 64-char lowercase string.
+fn generate_secret() -> String {
+    use rand::Rng;
+    let mut buf = [0u8; 32];
+    rand::rng().fill(&mut buf);
+    buf.iter().fold(String::with_capacity(64), |mut acc, b| {
+        use std::fmt::Write;
+        let _ = write!(acc, "{:02x}", b);
+        acc
+    })
+}
+
+/// Rejects any bind address that isn't loopback — cloclo has no transport
+/// security and must never be reachable off-host. Exposed (only this one
+/// function) so integration tests can exercise it directly.
+pub fn validate_loopback_bind(bind: &str) -> Result<(), ClocloError> {
+    match bind {
+        "127.0.0.1" | "::1" | "[::1]" | "localhost" => Ok(()),
+        other => Err(ClocloError::Config(format!(
+            "refusing to bind to non-loopback address '{}': cloclo has no transport security and must stay on loopback",
+            other
+        ))),
+    }
+}
+
+/// Writes the daemon secret to disk with 0600 permissions, atomically.
+fn write_daemon_secret(secret: &str) -> Result<(), ClocloError> {
+    let path = daemon_secret_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)?;
+        use std::io::Write;
+        writeln!(file, "{}", secret)?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::write(&path, format!("{}\n", secret))?;
+    }
+
+    Ok(())
 }
 
 /// Starts the proxy server and runs until shutdown is signaled.
 /// Used by `cloclo start --foreground`.
 pub async fn run(config: ClocloConfig, profile_name: &str, port: u16) -> Result<(), ClocloError> {
+    validate_loopback_bind(&config.general.bind)?;
+
     let bind_addr = format!("{}:{}", config.general.bind, port);
-    let mut state = create_state(config, profile_name)?;
+    let secret = generate_secret();
+    let mut state = create_state(config, profile_name, secret.clone())?;
 
     let listener = TcpListener::bind(&bind_addr).await.map_err(|e| {
         ClocloError::Proxy(format!("Failed to bind to {}: {}", bind_addr, e))
@@ -85,22 +152,27 @@ pub async fn run(config: ClocloConfig, profile_name: &str, port: u16) -> Result<
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
     let app = build_router(alexandrie, shutdown_tx);
 
+    write_daemon_secret(&secret)?;
+
     eprintln!("{}", startup_banner(actual_port, profile_name));
     info!("Proxy listening on {}", bind_addr);
 
-    axum::serve(listener, app)
+    let result = axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             let _ = shutdown_rx.wait_for(|&v| v).await;
             info!("{}", farewell());
         })
-        .await
-        .map_err(|e| ClocloError::Proxy(format!("Server error: {}", e)))?;
+        .await;
+
+    let _ = std::fs::remove_file(daemon_secret_path());
+
+    result.map_err(|e| ClocloError::Proxy(format!("Server error: {}", e)))?;
 
     Ok(())
 }
 
-/// Starts the proxy on port 0 (OS-assigned) and returns the actual port and a
-/// join handle for the server task.
+/// Starts the proxy on port 0 (OS-assigned) and returns the actual port, a
+/// per-session secret, and a join handle for the server task.
 ///
 /// The server runs until `shutdown_rx` receives `true` (triggered by
 /// `launch_claude`) OR until `POST /_cloclo/stop` fires — both paths use the
@@ -109,7 +181,8 @@ pub async fn run(config: ClocloConfig, profile_name: &str, port: u16) -> Result<
 /// was created here, making `/_cloclo/stop` a no-op for per-session proxies.
 ///
 /// The returned `JoinHandle` lets the caller await actual server teardown instead
-/// of relying on an arbitrary sleep.
+/// of relying on an arbitrary sleep. The returned secret is generated in-memory
+/// only — per-session proxies never touch disk for it, it travels via env vars.
 ///
 /// Used by `cloclo launch` for per-session proxies.
 pub async fn spawn_session(
@@ -117,8 +190,9 @@ pub async fn spawn_session(
     profile_name: &str,
     shutdown_tx: tokio::sync::watch::Sender<bool>,
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
-) -> Result<(u16, tokio::task::JoinHandle<()>), ClocloError> {
-    let mut state = create_state(config, profile_name)?;
+) -> Result<(u16, String, tokio::task::JoinHandle<()>), ClocloError> {
+    let secret = generate_secret();
+    let mut state = create_state(config, profile_name, secret.clone())?;
 
     // Bind to port 0 — the OS assigns a free port.
     let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| {
@@ -148,5 +222,5 @@ pub async fn spawn_session(
             .ok();
     });
 
-    Ok((port, handle))
+    Ok((port, secret, handle))
 }

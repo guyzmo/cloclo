@@ -27,6 +27,9 @@ pub struct ProxyState {
     pub managed_subprocess: Option<ManagedChild>,
     /// Runtime statistics.
     pub stats: SessionStats,
+    /// Per-session secret required on `x-api-key` for both the control and
+    /// data planes. Never echoed by any endpoint.
+    pub secret: String,
 }
 
 /// Resolved authentication — ready to inject into outgoing requests.

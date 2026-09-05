@@ -1,7 +1,7 @@
 use colored::Colorize;
 
 use crate::chanson::switching_quote;
-use crate::config::{load_config, ClocloConfig};
+use crate::config::{daemon_secret_path, load_config, ClocloConfig};
 use crate::error::ClocloError;
 
 /// Async HTTP client for control API calls.
@@ -21,6 +21,24 @@ fn resolve_port() -> Result<u16, ClocloError> {
     } else {
         let config = load_config()?;
         Ok(config.general.port)
+    }
+}
+
+/// Resolves the proxy secret: from CLOCLO_SECRET env var, or from the daemon's
+/// secret file on disk. Never sends an unauthenticated request if neither is
+/// available.
+pub(crate) fn resolve_secret() -> Result<String, ClocloError> {
+    if let Ok(secret) = std::env::var("CLOCLO_SECRET") {
+        Ok(secret)
+    } else {
+        std::fs::read_to_string(daemon_secret_path())
+            .map(|s| s.trim().to_string())
+            .map_err(|_| {
+                ClocloError::Auth(
+                    "no cloclo secret found (set CLOCLO_SECRET or start the daemon with `cloclo start`)"
+                        .into(),
+                )
+            })
     }
 }
 
@@ -54,7 +72,7 @@ pub async fn launch_claude(
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     // Start a per-session proxy on a random port.
-    let (port, proxy_handle) = crate::proxy::server::spawn_session(
+    let (port, secret, proxy_handle) = crate::proxy::server::spawn_session(
         config,
         &profile_name,
         shutdown_tx.clone(), // router's stop endpoint writes to this
@@ -74,8 +92,9 @@ pub async fn launch_claude(
     let mut child = tokio::process::Command::new(&claude_bin)
         .args(claude_args)
         .env("ANTHROPIC_BASE_URL", &proxy_url)
-        .env("ANTHROPIC_API_KEY", "sk-cloclo-proxy")
+        .env("ANTHROPIC_API_KEY", &secret)
         .env("CLOCLO_PORT", port.to_string())
+        .env("CLOCLO_SECRET", &secret)
         .env_remove("ANTHROPIC_AUTH_TOKEN")
         .stdin(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
@@ -124,11 +143,13 @@ pub async fn launch_claude(
 /// Reads the port from CLOCLO_PORT env var or config.
 pub async fn switch_profile_cli(profile: &str) -> Result<(), ClocloError> {
     let port = resolve_port()?;
+    let secret = resolve_secret()?;
     let url = format!("http://127.0.0.1:{}/_cloclo/switch", port);
 
     let client = control_client();
     let resp = client
         .post(&url)
+        .header("x-api-key", &secret)
         .json(&serde_json::json!({ "profile": profile }))
         .send()
         .await
@@ -160,11 +181,13 @@ pub async fn switch_profile_cli(profile: &str) -> Result<(), ClocloError> {
 /// Sets or clears the model override on a running proxy.
 pub async fn set_model_cli(model: Option<&str>) -> Result<(), ClocloError> {
     let port = resolve_port()?;
+    let secret = resolve_secret()?;
     let url = format!("http://127.0.0.1:{}/_cloclo/model", port);
 
     let client = control_client();
     let resp = client
         .post(&url)
+        .header("x-api-key", &secret)
         .json(&serde_json::json!({ "model": model }))
         .send()
         .await
@@ -196,10 +219,11 @@ pub async fn set_model_cli(model: Option<&str>) -> Result<(), ClocloError> {
 /// Shows the status of the running proxy.
 pub async fn show_status() -> Result<(), ClocloError> {
     let port = resolve_port()?;
+    let secret = resolve_secret()?;
     let url = format!("http://127.0.0.1:{}/_cloclo/status", port);
 
     let client = control_client();
-    let resp = client.get(&url).send().await.map_err(|e| {
+    let resp = client.get(&url).header("x-api-key", &secret).send().await.map_err(|e| {
         ClocloError::Proxy(format!(
             "Failed to contact proxy on port {} (is it running?): {}",
             port, e

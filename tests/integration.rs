@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 // ============================================================================
 // CONFIG TESTS
@@ -306,4 +307,73 @@ fn test_startup_banner_visual_structure() {
     assert!(banner.contains("8080"), "Banner should contain port");
     assert!(banner.contains("work"), "Banner should contain profile");
     assert!(banner.contains("cloclo"), "Banner should contain tool name");
+}
+
+// ============================================================================
+// PROXY AUTH / BIND TESTS
+// ============================================================================
+
+#[tokio::test]
+async fn test_require_secret_middleware() {
+    use cloclo::proxy::server::build_router;
+    use cloclo::proxy::state::{ProxyState, ResolvedAuth, SessionStats};
+    use tokio::sync::RwLock;
+
+    let known_secret = "test-secret-abc123".to_string();
+    let state = ProxyState {
+        active_profile: "personal".to_string(),
+        active_auth: ResolvedAuth::BearerToken("dummy".to_string()),
+        upstream_url: "http://localhost:1".to_string(),
+        model_override: None,
+        port: 0,
+        config: ClocloConfig {
+            general: GeneralConfig::default(),
+            profiles: HashMap::new(),
+            desktop: HashMap::new(),
+        },
+        client: reqwest::Client::new(),
+        managed_subprocess: None,
+        stats: SessionStats::default(),
+        secret: known_secret.clone(),
+    };
+    let alexandrie = Arc::new(RwLock::new(state));
+    let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+    let app = build_router(alexandrie, shutdown_tx);
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.ok();
+    });
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{}", port);
+
+    // Health check requires no auth.
+    let resp = client.get(format!("{}/_cloclo/health", base)).send().await.unwrap();
+    assert_eq!(resp.status(), 200);
+
+    // Status without a key is rejected.
+    let resp = client.get(format!("{}/_cloclo/status", base)).send().await.unwrap();
+    assert_eq!(resp.status(), 401);
+
+    // Status with the correct key succeeds.
+    let resp = client
+        .get(format!("{}/_cloclo/status", base))
+        .header("x-api-key", &known_secret)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+}
+
+#[test]
+fn test_validate_loopback_bind() {
+    use cloclo::proxy::server::validate_loopback_bind;
+
+    assert!(validate_loopback_bind("127.0.0.1").is_ok());
+    assert!(validate_loopback_bind("::1").is_ok());
+    assert!(validate_loopback_bind("localhost").is_ok());
+    assert!(validate_loopback_bind("0.0.0.0").is_err());
+    assert!(validate_loopback_bind("192.168.1.1").is_err());
 }

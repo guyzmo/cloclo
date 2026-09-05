@@ -119,25 +119,29 @@ pub fn start_daemon(
 
 /// Stops a running daemon, trying a graceful HTTP shutdown first, then SIGTERM.
 pub async fn stop_daemon(pid_path: &PathBuf) -> Result<(), ClocloError> {
-    // Try graceful shutdown via the control API first.
+    // Try graceful shutdown via the control API first. A missing/unreadable
+    // secret must not make the daemon unkillable — just skip straight to SIGTERM.
     if let Ok(config) = crate::config::load_config() {
-        let port = config.general.port;
-        let url = format!("http://127.0.0.1:{}/_cloclo/stop", port);
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(3))
-            .build()
-            .unwrap();
+        if let Ok(secret) = crate::launch::resolve_secret() {
+            let port = config.general.port;
+            let url = format!("http://127.0.0.1:{}/_cloclo/stop", port);
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(3))
+                .build()
+                .unwrap();
 
-        if client
-            .post(&url)
-            .send()
-            .await
-            .map(|r| r.status().is_success())
-            .unwrap_or(false)
-        {
-            let _ = std::fs::remove_file(pid_path);
-            println!("{}", crate::chanson::farewell());
-            return Ok(());
+            if client
+                .post(&url)
+                .header("x-api-key", &secret)
+                .send()
+                .await
+                .map(|r| r.status().is_success())
+                .unwrap_or(false)
+            {
+                let _ = std::fs::remove_file(pid_path);
+                println!("{}", crate::chanson::farewell());
+                return Ok(());
+            }
         }
     }
 
