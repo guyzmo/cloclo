@@ -45,12 +45,27 @@ pub async fn login(
     if let Some(parent) = expanded.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&expanded, format!("{}\n", token.trim()))?;
 
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&expanded)?;
+        f.write_all(format!("{}\n", token.trim()).as_bytes())?;
+        // .mode() only applies when the file is newly created; if it already existed from a
+        // prior login with looser perms, O_CREAT is a no-op for the mode and old bits survive.
+        // Tighten explicitly — this is a post-hoc fix-up, not a write-then-chmod race, since a
+        // freshly created file was never readable by anyone else.
         std::fs::set_permissions(&expanded, std::fs::Permissions::from_mode(0o600))?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(&expanded, format!("{}\n", token.trim()))?;
     }
 
     println!(
