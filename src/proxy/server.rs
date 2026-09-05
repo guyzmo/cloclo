@@ -54,12 +54,33 @@ pub fn build_router(
 }
 
 /// Creates the shared proxy state from a config, profile name, and secret.
-fn create_state(
+///
+/// If the selected profile is a `Proxy` with a configured `subprocess`, it is
+/// spawned and health-checked here — mirroring `control::switch_profile` —
+/// so profiles chosen at startup (not just via runtime switch) get their
+/// backend running before the first request.
+async fn create_state(
     config: ClocloConfig,
     profile_name: &str,
     secret: String,
 ) -> Result<ProxyState, ClocloError> {
     let (auth, upstream_url) = resolve_profile(&config, profile_name)?;
+
+    // Clone the subprocess config out (if any) so the borrow of `config` ends
+    // before `config` is moved into the ProxyState below.
+    let sub_cfg = match config.profiles.get(profile_name) {
+        Some(crate::config::ProfileConfig::Proxy { subprocess: Some(sub_cfg), .. }) => {
+            Some(sub_cfg.clone())
+        }
+        _ => None,
+    };
+
+    let managed_subprocess = if let Some(sub_cfg) = sub_cfg {
+        Some(crate::subprocess::spawn_and_wait_healthy(&sub_cfg, profile_name).await?)
+    } else {
+        None
+    };
+
     Ok(ProxyState {
         active_profile: profile_name.to_string(),
         active_auth: auth,
@@ -68,7 +89,7 @@ fn create_state(
         port: 0, // set after binding
         config,
         client: reqwest::Client::new(),
-        managed_subprocess: None,
+        managed_subprocess,
         stats: SessionStats {
             requests_forwarded: 0,
             profile_switches: 0,
@@ -138,7 +159,7 @@ pub async fn run(config: ClocloConfig, profile_name: &str, port: u16) -> Result<
 
     let bind_addr = format!("{}:{}", config.general.bind, port);
     let secret = generate_secret();
-    let mut state = create_state(config, profile_name, secret.clone())?;
+    let mut state = create_state(config, profile_name, secret.clone()).await?;
 
     let listener = TcpListener::bind(&bind_addr).await.map_err(|e| {
         ClocloError::Proxy(format!("Failed to bind to {}: {}", bind_addr, e))
@@ -192,7 +213,7 @@ pub async fn spawn_session(
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(u16, String, tokio::task::JoinHandle<()>), ClocloError> {
     let secret = generate_secret();
-    let mut state = create_state(config, profile_name, secret.clone())?;
+    let mut state = create_state(config, profile_name, secret.clone()).await?;
 
     // Bind to port 0 — the OS assigns a free port.
     let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| {

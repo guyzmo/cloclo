@@ -24,21 +24,30 @@ pub async fn forward_messages(
     body: Bytes,
 ) -> Result<Response, ProxyError> {
     // Grab what we need from state, then release the lock immediately.
-    let (auth, upstream_url, client, model_override) = {
+    let (auth, upstream_url, client, effective_model) = {
         let mut state = alexandrie.write().await;
         state.stats.requests_forwarded += 1;
         let auth = state.active_auth.clone();
         let upstream_url = state.upstream_url.clone();
         let client = state.client.clone();
-        let model_override = state.model_override.clone();
-        (auth, upstream_url, client, model_override)
+        // Explicit override wins; otherwise fall back to the active profile's
+        // configured model so this matches what control::get_model reports.
+        let effective_model = state.model_override.clone().or_else(|| {
+            state
+                .config
+                .profiles
+                .get(&state.active_profile)
+                .and_then(|p| p.model())
+                .map(str::to_string)
+        });
+        (auth, upstream_url, client, effective_model)
     };
 
     // Build the upstream URL.
     let url = format!("{}/v1/messages", upstream_url.trim_end_matches('/'));
 
-    // If a model override is set, rewrite the model field in the request body.
-    let body = if let Some(ref model) = model_override {
+    // If a model is set (override or profile default), rewrite the body.
+    let body = if let Some(ref model) = effective_model {
         if let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&body) {
             json["model"] = serde_json::Value::String(model.clone());
             Bytes::from(serde_json::to_vec(&json).unwrap_or_else(|_| body.to_vec()))
