@@ -13,6 +13,16 @@ Claude Code  →  cloclo proxy (127.0.0.1:9393)  →  Anthropic API / Enterprise
               cloclo CLI (login/switch/status/launch)
 ```
 
+## Disclaimer
+
+`cloclo` is an unofficial, community project — it is not affiliated with,
+endorsed by, or supported by Anthropic. It never scrapes, intercepts, or
+reverse-engineers credentials: tokens are obtained exclusively through the
+official `claude setup-token` flow (see `cloclo login`) and stored locally
+with `0600` permissions. Your use of Claude and the Anthropic API through
+`cloclo` remains subject to Anthropic's own Terms of Service and Usage
+Policies; using multiple accounts is your responsibility.
+
 ## Install
 
 Quick install via Claude Code:
