@@ -96,9 +96,21 @@ pub fn start_daemon(
         .stderr(log_file_err)
         .stdin(std::process::Stdio::null());
 
-    let child = cmd.spawn().map_err(|e| {
+    let mut child = cmd.spawn().map_err(|e| {
         ClocloError::Daemon(format!("Failed to spawn daemon: {}", e))
     })?;
+
+    // Give the child a brief moment to fail fast (e.g. a rejected bind address)
+    // before we report success — an early exit here means it never got as far
+    // as writing a PID of its own, so the banner below would otherwise lie.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    if let Ok(Some(status)) = child.try_wait() {
+        return Err(ClocloError::Daemon(format!(
+            "Daemon exited immediately with {} — see {} for details",
+            status,
+            log_path.display()
+        )));
+    }
 
     // Write PID file.
     if let Some(parent) = pid_path.parent() {
