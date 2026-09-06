@@ -17,11 +17,17 @@ Claude Code  →  cloclo proxy (127.0.0.1:9393)  →  Anthropic API / Enterprise
 
 `cloclo` is an unofficial, community project — it is not affiliated with,
 endorsed by, or supported by Anthropic. It never scrapes, intercepts, or
-reverse-engineers credentials: tokens are obtained exclusively through the
-official `claude setup-token` flow (see `cloclo login`) and stored locally
-with `0600` permissions. Your use of Claude and the Anthropic API through
-`cloclo` remains subject to Anthropic's own Terms of Service and Usage
-Policies; using multiple accounts is your responsibility.
+reverse-engineers credentials: by default, tokens are obtained through the
+official `claude setup-token` flow (see `cloclo login`); profiles can also be
+configured with a literal token, an environment variable, or an arbitrary
+token file, in which case protecting that credential is up to you. On Unix,
+token and daemon-secret files cloclo writes itself are stored with `0600`
+permissions; this guarantee does not extend to Windows. Both the proxy and
+control API are protected only by a locally-generated shared secret, scoped
+to loopback — there is no transport security, so `cloclo` must never be
+exposed off-host. Your use of Claude and the Anthropic API through `cloclo`
+remains subject to Anthropic's own Terms of Service and Usage Policies;
+using multiple accounts is your responsibility.
 
 ## Install
 
