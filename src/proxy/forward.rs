@@ -30,33 +30,14 @@ pub async fn forward_messages(
         let auth = state.active_auth.clone();
         let upstream_url = state.upstream_url.clone();
         let client = state.client.clone();
-        // Explicit override wins; otherwise fall back to the active profile's
-        // configured model so this matches what control::get_model reports.
-        let effective_model = state.model_override.clone().or_else(|| {
-            state
-                .config
-                .profiles
-                .get(&state.active_profile)
-                .and_then(|p| p.model())
-                .map(str::to_string)
-        });
+        let effective_model = effective_model_for(&state);
         (auth, upstream_url, client, effective_model)
     };
 
     // Build the upstream URL.
     let url = format!("{}/v1/messages", upstream_url.trim_end_matches('/'));
 
-    // If a model is set (override or profile default), rewrite the body.
-    let body = if let Some(ref model) = effective_model {
-        if let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&body) {
-            json["model"] = serde_json::Value::String(model.clone());
-            Bytes::from(serde_json::to_vec(&json).unwrap_or_else(|_| body.to_vec()))
-        } else {
-            body
-        }
-    } else {
-        body
-    };
+    let body = apply_model_override(body, effective_model.as_deref());
 
     // Build the outgoing request.
     let mut req_builder = client
@@ -122,18 +103,21 @@ pub async fn forward_json(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ProxyError> {
-    let (auth, upstream_url, client) = {
+    let (auth, upstream_url, client, effective_model) = {
         let mut state = alexandrie.write().await;
         state.stats.requests_forwarded += 1;
+        let effective_model = effective_model_for(&state);
         (
             state.active_auth.clone(),
             state.upstream_url.clone(),
             state.client.clone(),
+            effective_model,
         )
     };
 
     let path = uri.path();
     let url = format!("{}{}", upstream_url.trim_end_matches('/'), path);
+    let body = apply_model_override(body, effective_model.as_deref());
 
     let mut req_builder = client
         .post(&url)
@@ -212,14 +196,16 @@ pub async fn forward_fallback(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ProxyError> {
-    let (auth, upstream_url, client) = {
+    let (auth, upstream_url, client, effective_model) = {
         let mut state = alexandrie.write().await;
         state.stats.requests_forwarded += 1;
-        (state.active_auth.clone(), state.upstream_url.clone(), state.client.clone())
+        let effective_model = effective_model_for(&state);
+        (state.active_auth.clone(), state.upstream_url.clone(), state.client.clone(), effective_model)
     };
 
     let path = uri.path();
     let url = format!("{}{}", upstream_url.trim_end_matches('/'), path);
+    let body = apply_model_override(body, effective_model.as_deref());
 
     let mut req_builder = client.request(method, &url)
         .header("content-type", "application/json")
@@ -261,6 +247,35 @@ pub async fn forward_fallback(
             builder = builder.header(key, value);
         }
         builder.body(Body::from(resp_bytes)).map_err(|e| ProxyError::Internal(e.to_string()))
+    }
+}
+
+/// Resolves the effective model for the current request: an explicit runtime
+/// override wins; otherwise falls back to the active profile's configured
+/// model, matching what `control::get_model` reports.
+fn effective_model_for(state: &crate::proxy::state::ProxyState) -> Option<String> {
+    state.model_override.clone().or_else(|| {
+        state
+            .config
+            .profiles
+            .get(&state.active_profile)
+            .and_then(|p| p.model())
+            .map(str::to_string)
+    })
+}
+
+/// Rewrites the `model` field of a JSON request body, if a model is set and
+/// the body actually decodes to a JSON object. Non-object bodies (arrays,
+/// scalars, or invalid JSON) are passed through unchanged rather than
+/// panicking on `Value`'s `IndexMut`, which requires an object.
+fn apply_model_override(body: Bytes, model: Option<&str>) -> Bytes {
+    let Some(model) = model else { return body };
+    match serde_json::from_slice::<serde_json::Value>(&body) {
+        Ok(mut json) if json.is_object() => {
+            json["model"] = serde_json::Value::String(model.to_string());
+            Bytes::from(serde_json::to_vec(&json).unwrap_or_else(|_| body.to_vec()))
+        }
+        _ => body,
     }
 }
 
