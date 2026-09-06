@@ -25,13 +25,13 @@ fn resolve_port() -> Result<u16, ClocloError> {
 }
 
 /// Resolves the proxy secret: from CLOCLO_SECRET env var, or from the daemon's
-/// secret file on disk. Never sends an unauthenticated request if neither is
-/// available.
-pub(crate) fn resolve_secret() -> Result<String, ClocloError> {
+/// per-port secret file on disk. Never sends an unauthenticated request if
+/// neither is available.
+pub(crate) fn resolve_secret(port: u16) -> Result<String, ClocloError> {
     if let Ok(secret) = std::env::var("CLOCLO_SECRET") {
         Ok(secret)
     } else {
-        std::fs::read_to_string(daemon_secret_path())
+        std::fs::read_to_string(daemon_secret_path(port))
             .map(|s| s.trim().to_string())
             .map_err(|_| {
                 ClocloError::Auth(
@@ -143,7 +143,7 @@ pub async fn launch_claude(
 /// Reads the port from CLOCLO_PORT env var or config.
 pub async fn switch_profile_cli(profile: &str) -> Result<(), ClocloError> {
     let port = resolve_port()?;
-    let secret = resolve_secret()?;
+    let secret = resolve_secret(port)?;
     let url = format!("http://127.0.0.1:{}/_cloclo/switch", port);
 
     let client = control_client();
@@ -181,7 +181,7 @@ pub async fn switch_profile_cli(profile: &str) -> Result<(), ClocloError> {
 /// Sets or clears the model override on a running proxy.
 pub async fn set_model_cli(model: Option<&str>) -> Result<(), ClocloError> {
     let port = resolve_port()?;
-    let secret = resolve_secret()?;
+    let secret = resolve_secret(port)?;
     let url = format!("http://127.0.0.1:{}/_cloclo/model", port);
 
     let client = control_client();
@@ -219,7 +219,7 @@ pub async fn set_model_cli(model: Option<&str>) -> Result<(), ClocloError> {
 /// Shows the status of the running proxy.
 pub async fn show_status() -> Result<(), ClocloError> {
     let port = resolve_port()?;
-    let secret = resolve_secret()?;
+    let secret = resolve_secret(port)?;
     let url = format!("http://127.0.0.1:{}/_cloclo/status", port);
 
     let client = control_client();

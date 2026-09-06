@@ -158,12 +158,14 @@ pub fn config_path() -> PathBuf {
         .join("config.toml")
 }
 
-/// Returns the path to the daemon's per-run secret file: `~/.config/cloclo/daemon.secret`.
-pub fn daemon_secret_path() -> PathBuf {
+/// Returns the path to the daemon's per-run secret file for a given port:
+/// `~/.config/cloclo/daemon-<port>.secret`. Keyed by port so that concurrent
+/// daemons on different ports don't clobber or delete each other's secret.
+pub fn daemon_secret_path(port: u16) -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("cloclo")
-        .join("daemon.secret")
+        .join(format!("daemon-{}.secret", port))
 }
 
 /// Loads the configuration from the default path.

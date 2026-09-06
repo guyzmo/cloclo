@@ -122,8 +122,8 @@ pub async fn stop_daemon(pid_path: &PathBuf) -> Result<(), ClocloError> {
     // Try graceful shutdown via the control API first. A missing/unreadable
     // secret must not make the daemon unkillable — just skip straight to SIGTERM.
     if let Ok(config) = crate::config::load_config() {
-        if let Ok(secret) = crate::launch::resolve_secret() {
-            let port = config.general.port;
+        let port = config.general.port;
+        if let Ok(secret) = crate::launch::resolve_secret(port) {
             let url = format!("http://127.0.0.1:{}/_cloclo/stop", port);
             let client = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(3))

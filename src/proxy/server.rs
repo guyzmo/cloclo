@@ -125,23 +125,27 @@ pub fn validate_loopback_bind(bind: &str) -> Result<(), ClocloError> {
 }
 
 /// Writes the daemon secret to disk with 0600 permissions, atomically.
-fn write_daemon_secret(secret: &str) -> Result<(), ClocloError> {
-    let path = daemon_secret_path();
+fn write_daemon_secret(secret: &str, port: u16) -> Result<(), ClocloError> {
+    let path = daemon_secret_path(port);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
 
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .mode(0o600)
             .open(&path)?;
-        use std::io::Write;
         writeln!(file, "{}", secret)?;
+        // .mode() only applies when the file is newly created; if it already
+        // existed from a prior run with looser perms, O_CREAT is a no-op for
+        // the mode and old bits survive. Tighten explicitly, mirroring login.rs.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     }
 
     #[cfg(not(unix))]
@@ -173,7 +177,7 @@ pub async fn run(config: ClocloConfig, profile_name: &str, port: u16) -> Result<
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
     let app = build_router(alexandrie, shutdown_tx);
 
-    write_daemon_secret(&secret)?;
+    write_daemon_secret(&secret, actual_port)?;
 
     eprintln!("{}", startup_banner(actual_port, profile_name));
     info!("Proxy listening on {}", bind_addr);
@@ -185,7 +189,7 @@ pub async fn run(config: ClocloConfig, profile_name: &str, port: u16) -> Result<
         })
         .await;
 
-    let _ = std::fs::remove_file(daemon_secret_path());
+    let _ = std::fs::remove_file(daemon_secret_path(actual_port));
 
     result.map_err(|e| ClocloError::Proxy(format!("Server error: {}", e)))?;
 
